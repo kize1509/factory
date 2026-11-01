@@ -200,6 +200,7 @@ Since then, these parts are done.
 - The map follows the engine. Served by `factory serve`, it loads the real jobs and follows each one's event stream. State picks the place, tool calls and status become bubbles, thinking fills the agent panel, checks colour the Oracle smoke, handoffs fly as scrolls, usage adds to the dollar counters, processes fill the Processes panel, and a commit sails the ship. New task starts a job, and the UFO sends a real steer. Served any other way, the page keeps the demo.
 - `http://127.0.0.1:7777/` opens the app, live only with no demo. The art preview with the demo stays at `/assets/preview.html`.
 - New task takes an issue ID and optional notes. With YouTrack set up (Admin → Connections), the engine loads the issue's title and description and adds your notes. Without it, the notes are the task. Running the same ticket again gets `-run2`, `-run3`.
+- Shipping follows the ticket's "Ship mode" field in YouTrack: Commit, Push or PR. The engine reads it when each job starts, so a change applies to the next job without a restart. When the ticket leaves it empty, `ship` in `factory.yml` decides, and the default is `commit`. Agents never commit themselves: the builder is told not to, and any commit it makes on the job branch is undone (`ship.uncommitted`) before the engine makes its own. Push goes to `origin`, and the PR is opened with `gh`, from the builder's handoff and the reviewer's summary.
 - Admin opens over the map (the Admin button or the A key) and starts on a Jobs tab. It lists every job with its state (running and in which phase, waiting on you with the question and an answer box, done with branch and commit, failed with the error), cost, time, runtime and model, and buttons to show it on the map or stop it. It refreshes every 3 seconds.
 - The admin panel at `/admin.html` has these pages: Connections (wire status, Central version, credits, YouTrack URL and token), Runtimes (installed versions), Models (read live from the wire), Roles (runtime and model per role, only valid pairs, used by builders now), Metrics (spend, requests, tokens, cost by model and agent, time per phase, tool calls, who talks to whom, checks, jobs) and Limits (off by default). Settings are stored in `~/.factory/settings.json`.
 - Fonts are served by the engine (`web/fonts/`), so the app loads instantly and works offline.
@@ -254,4 +255,4 @@ The planned layout of `.factory/` is in PRD §10.6.
 2. ~~Claude Code and Codex runtimes.~~ Done.
 3. The other roles: survey and check plan, research, planner, humanizer, finalizer, scheduler (the reviewer is done).
 4. YouTrack: load a ticket by ID, comment and move it to review.
-5. Ship modes push and PR.
+5. ~~Ship modes push and PR.~~ Done.

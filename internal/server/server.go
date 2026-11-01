@@ -82,6 +82,7 @@ func (s *Server) startJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	spec.Issue, spec.Notes = strings.TrimSpace(spec.Issue), strings.TrimSpace(spec.Notes)
+	ticketShip := "" // the ticket's Ship mode, read fresh for every job
 	if spec.Issue != "" && spec.Prompt == "" {
 		// a ticket ID: load it from YouTrack, add your notes
 		yt := config.LoadEngine().YouTrack
@@ -94,6 +95,7 @@ func (s *Server) startJob(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			spec.Title = is.Summary
+			ticketShip = is.ShipMode()
 			spec.Prompt = is.Summary + "\n\n" + strings.TrimSpace(is.Description)
 			if spec.Notes != "" {
 				spec.Prompt += "\n\nNotes from the person who started this job:\n" + spec.Notes
@@ -118,6 +120,10 @@ func (s *Server) startJob(w http.ResponseWriter, r *http.Request) {
 	proj, err := config.LoadProject(spec.Repo)
 	if err != nil {
 		http.Error(w, "factory.yml: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if spec.Ship = config.ShipMode(ticketShip, proj.Ship); spec.Ship == "" {
+		http.Error(w, fmt.Sprintf("unknown ship mode (ticket %q, factory.yml %q); use commit, push or pr", ticketShip, proj.Ship), http.StatusBadRequest)
 		return
 	}
 	if len(spec.Checks) == 0 && strings.TrimSpace(spec.TestNotes) == "" {

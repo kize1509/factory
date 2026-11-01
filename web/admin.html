@@ -157,9 +157,9 @@ async function runtimes() {
 // ---------- Models ----------
 // ---------- Jobs: is it running, waiting on you, done or failed ----------
 let refresher = null;
-const RUNNING = ['starting', 'planning', 'symposium', 'grading', 'building', 'checking', 'handoff', 'reviewing', 'committing'];
+const RUNNING = ['starting', 'planning', 'symposium', 'grading', 'building', 'checking', 'handoff', 'reviewing', 'committing', 'shipping'];
 const stateOf = j => RUNNING.includes(j.state) ? 'running' : j.state;
-const PHASE = { planning:'planning at the Academy', symposium:'trying several approaches at the Symposium', grading:'grading the experiments', starting:'starting', building:'building at the Workshop', checking:'running checks at the Oracle', handoff:'writing the handoff', reviewing:'in review at the Areopagus', committing:'committing' };
+const PHASE = { planning:'planning at the Academy', symposium:'trying several approaches at the Symposium', grading:'grading the experiments', starting:'starting', building:'building at the Workshop', checking:'running checks at the Oracle', handoff:'writing the handoff', reviewing:'in review at the Areopagus', committing:'committing', shipping:'shipping from the Harbour' };
 const ago = t => { const s = Math.max(0, (Date.now() - Date.parse(t)) / 1000); return s < 90 ? Math.round(s) + ' s ago' : s < 5400 ? Math.round(s / 60) + ' min ago' : s < 129600 ? Math.round(s / 3600) + ' h ago' : Math.round(s / 86400) + ' days ago'; };
 async function jobs() {
   const draw = async () => {

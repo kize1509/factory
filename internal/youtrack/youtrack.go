@@ -25,14 +25,42 @@ type Issue struct {
 	Project     struct {
 		ShortName string `json:"shortName"`
 	} `json:"project"`
+	CustomFields []struct {
+		Name  string          `json:"name"`
+		Value json.RawMessage `json:"value"`
+	} `json:"customFields"`
 }
+
+// ShipModeField is the ticket field that says how a job ships: Commit,
+// Push or PR.
+const ShipModeField = "Ship mode"
+
+// field returns the name of a single-value field, or "" when it is empty
+// or missing.
+func (is Issue) field(name string) string {
+	for _, f := range is.CustomFields {
+		if f.Name != name {
+			continue
+		}
+		var v struct {
+			Name string `json:"name"`
+		}
+		json.Unmarshal(f.Value, &v) // null stays empty
+		return strings.TrimSpace(v.Name)
+	}
+	return ""
+}
+
+// ShipMode is the ticket's ship mode in lower case (commit, push or pr),
+// or "" when the ticket doesn't set one.
+func (is Issue) ShipMode() string { return strings.ToLower(is.field(ShipModeField)) }
 
 func (c Client) Configured() bool { return c.URL != "" && c.Token != "" }
 
 // Issue loads one issue by its readable ID, like ABC-123.
 func (c Client) Issue(ctx context.Context, id string) (Issue, error) {
 	var is Issue
-	u := strings.TrimRight(c.URL, "/") + "/api/issues/" + url.PathEscape(id) + "?fields=idReadable,summary,description,project(shortName)"
+	u := strings.TrimRight(c.URL, "/") + "/api/issues/" + url.PathEscape(id) + "?fields=idReadable,summary,description,project(shortName),customFields(name,value(name))"
 	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
 	if err != nil {
 		return is, err

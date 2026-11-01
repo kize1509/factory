@@ -79,6 +79,33 @@ func (w *Worktree) Commit(msg string) (string, error) {
 	return strings.TrimSpace(sha), err
 }
 
+// Uncommit moves the branch back to base and keeps every change in the
+// working tree, so commits an agent made on its own don't count.
+func (w *Worktree) Uncommit(base string) error {
+	_, err := git(w.Path, "reset", "--soft", "-q", base)
+	return err
+}
+
+// Push sends the job branch to origin.
+func (w *Worktree) Push() error {
+	_, err := git(w.Path, "push", "-u", "origin", w.Branch)
+	return err
+}
+
+// OpenPR opens a pull request for the job branch with the gh CLI and
+// returns its URL.
+func (w *Worktree) OpenPR(title, body string) (string, error) {
+	cmd := exec.Command("gh", "pr", "create", "--head", w.Branch, "--title", title, "--body", body)
+	cmd.Dir = w.Path
+	var out, errb bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errb
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("gh pr create: %v: %s", err, strings.TrimSpace(errb.String()))
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	return strings.TrimSpace(lines[len(lines)-1]), nil
+}
+
 // ensureIgnored makes sure .factory/ is in the repo's .gitignore.
 func ensureIgnored(repo string) error {
 	path := filepath.Join(repo, ".gitignore")
