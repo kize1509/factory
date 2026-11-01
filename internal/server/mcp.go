@@ -58,6 +58,11 @@ var mcpTools = []map[string]any{
 			"approved": map[string]any{"type": "boolean"}, "findings": list_(), "summary": str_()}, "required": []string{"approved", "findings"}},
 	},
 	{
+		"name":        "name_job",
+		"description": "Planners only, first thing: give the job a short readable title (at most 60 characters, plain words) and, if asked, the project a name. Shown on the map.",
+		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"title": str_(), "project": str_()}, "required": []string{"title"}},
+	},
+	{
 		"name":        "set_status",
 		"description": "Say in a few words what you are doing now. Shown above your head on the map.",
 		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"step": str_()}, "required": []string{"step"}},

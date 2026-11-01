@@ -192,6 +192,13 @@ func (w *Worktree) DiffFrom(base string) string {
 	return out
 }
 
+// Stat lists the files changed since base, with lines added and removed.
+func (w *Worktree) Stat(base string) string {
+	git(w.Path, "add", "-A", "--intent-to-add")
+	out, _ := git(w.Path, "diff", "--stat", base)
+	return strings.TrimSpace(out)
+}
+
 // Remove deletes the worktree and its branch.
 func (w *Worktree) Remove() {
 	git(w.Repo, "worktree", "remove", "--force", w.Path)

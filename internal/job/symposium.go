@@ -123,8 +123,10 @@ func (j *Job) takeProposal() *Proposal {
 	return p
 }
 
-// runPlanner has the planner explore and either propose experiments or
-// leave a plan. It returns the proposal, if any, and the planner's note.
+// runPlanner has the planner name the job, explore, and either propose
+// experiments or leave a plan. Every job gets one; reason says why a job
+// counts as complex, or is "" when it doesn't. It returns the proposal, if
+// any, and the planner's note.
 func (j *Job) runPlanner(ctx context.Context, wt *workspace.Worktree, reason string) (*Proposal, *handoff.Note, error) {
 	j.set("planning")
 	role := j.role("planner")
@@ -136,7 +138,20 @@ func (j *Job) runPlanner(ctx context.Context, wt *workspace.Worktree, reason str
 	j.mu.Lock()
 	j.agents[planner] = a
 	j.mu.Unlock()
-	task := fmt.Sprintf("Ticket %s: %s\n\n%s\n\nThis job counts as complex because %s.\n\n", j.ID, j.Title, j.Prompt, reason)
+	task := fmt.Sprintf("Ticket %s: %s\n\n%s\n\n", j.ID, j.Title, j.Prompt)
+	j.mu.Lock()
+	named := j.named
+	j.mu.Unlock()
+	if named { // a second call, after the checks kept failing: the name stands
+	} else if j.Project == "" {
+		task += fmt.Sprintf("First call name_job with a short, readable title for this task (at most 60 characters, plain words, no file paths) "+
+			"and a name for the project in %s: the name it gives itself (the README's title, else the module or package name), not the folder's name; e.g. \"Invoice Service\".\n\n", j.Repo)
+	} else {
+		task += fmt.Sprintf("First call name_job with a short, readable title for this task (at most 60 characters, plain words, no file paths). The project is %s.\n\n", j.Project)
+	}
+	if reason != "" {
+		task += fmt.Sprintf("This job counts as complex because %s.\n\n", reason)
+	}
 	if j.TestNotes != "" && len(j.Checks) == 0 {
 		task += "How to test it, from the person who started the job:\n" + j.TestNotes + "\nCall set_checks with the exact commands, so every approach is checked the same way.\n\n"
 	}
@@ -146,9 +161,12 @@ func (j *Job) runPlanner(ctx context.Context, wt *workspace.Worktree, reason str
 	if asked {
 		task += "Explore the code (don't change it). The person who started this job asked for several approaches to be tried, so call propose_experiments with 2 to 4 really different ones: " +
 			"a short name, the hypothesis, the approach and the signal that would show it works. Then write your handoff."
-	} else {
+	} else if reason != "" {
 		task += "Explore the code (don't change it). If two or more approaches are workable and none is clearly better, call propose_experiments with 2 to 4 of them: " +
 			"a short name, the hypothesis, the approach and the signal that would show it works. Otherwise write the plan in your handoff for the builder."
+	} else {
+		task += "Explore the code around the task (don't change it) and write a short plan in your handoff for the builder: the approach, the files, the order and the risks. " +
+			"Keep it brief when the task is small. Only if the task turns out to have two or more workable approaches with no clear best, call propose_experiments instead."
 	}
 	if _, err := j.ask(ctx, a, task); err != nil {
 		return nil, nil, fmt.Errorf("planner: %w", err)

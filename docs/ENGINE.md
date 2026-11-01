@@ -138,25 +138,38 @@ Sidecar to engine:
 
 The sidecar runs Pi with its own agent folder (`.factory/pi-agent/`), so your personal Pi extensions don't load. Its `models.json` points the `anthropic` and `openai` providers at the engine's gateway. Factory tools (`handoff`, `set_status`, `board_post`) are Pi custom tools that call the engine's HTTP API.
 
-## 6. Job pipeline (M0)
+## 6. Job pipeline
 
 ```mermaid
 flowchart TD
     S["start"] --> W["worktree, branch factory/JOB"]
-    W --> BP["builder prompt"]
-    BP --> BW["builder works"]
+    W --> PL["Aristotle plans and names the job"]
+    PL -->|"several approaches"| SY["Symposium"]
+    PL --> BW["builder works"]
+    SY --> HC
     BW --> RC["run checks"]
     RC -->|pass| HC["handoff check"]
     RC -->|"fail: send failures back to the builder, max N loops"| BW
     HC -->|valid| RV["review (Socrates)"]
     HC -->|"missing or invalid: prompt same agent, twice at most"| HC
-    HC -->|"still invalid"| X["job fails"]
     RV -->|"blocking findings, max 2 rounds"| BW
     RV -->|ok| CM["commit"]
     CM --> D["done"]
+    BW & RC & HC & RV & CM -.->|"can't get further"| ST["stuck: tells you, waits"]
+    ST -.->|"your guidance"| BW
 ```
 
-The handoff check follows PRD §7.6, with one difference from the PRD: after two failed retries M0 fails the job instead of pausing for an Inbox card. Open questions in a note put the job in a "needs you" state instead of failing it. The agent waves on the map, your reply is added to the note, and the job continues.
+Every job starts with Aristotle. He names it (and, the first time, the project: `name_job`), reads the code and leaves a plan for the builder. On a complex job he may open a Symposium.
+
+A job never fails. When the engine can't get further on its own (the checks keep failing, the handoff stays invalid, review keeps blocking, the commit or push breaks, or you stop it), the job gets **stuck**:
+
+- It writes down where it stopped in `.factory/jobs/<job>/resume.md` (and `resume.json`): the task, the step, why, the checks and their last output, the review findings, every handoff note, the files changed so far and your guidance so far.
+- It tells you: a bar on the map that stays until you act, a chime, a desktop notification, the count in the tab title and a beacon on the island. Admin → Jobs shows it too.
+- It keeps its agents and worktree and waits.
+
+Your guidance (Guide it on, in the bar, the Admin Jobs tab, or a message to the agent) goes to the same builder, which remembers its work. A job stuck before a restart starts a new builder in the same worktree with the written brief and your guidance. Then the checks, the handoff, review and the commit follow as usual. It can get stuck and be guided on as often as it takes. Old failed or interrupted jobs can be guided on the same way.
+
+Open questions in a handoff note put the job in a "needs you" state. Your reply is added to the note and the job continues.
 
 The review step is described in §8. The other roles (research, planning, humanizer, finalizer, scheduler) come in M1. M0 proves the spine: worktree, Pi, gateway, checks, healing loop, handoff, events.
 
@@ -166,6 +179,9 @@ The review step is described in §8. The other roles (research, planning, humani
 |---|---|---|
 | POST | `/api/jobs` | start a job: `{repo, title, prompt, checks: ["npm test"], model}` |
 | GET | `/api/jobs` | list jobs and their state |
+| POST | `/api/jobs/<job>/continue` | guide a stuck job on: `{text}` |
+| GET | `/api/jobs/<job>/context` | what a stuck job wrote down about where it stopped |
+| GET | `/api/projects` | readable project names, by repo |
 | GET | `/api/events?job=<id>` | server-sent events, replays the job's log first |
 | POST | `/api/agents/<job>/<agent>/message` | steer an agent (the UFO) |
 | POST | `/api/agents/<job>/<agent>/stop` | stop an agent |

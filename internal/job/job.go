@@ -42,13 +42,15 @@ type Spec struct {
 	// simple, medium or complex; complex work (or you saying so in the notes)
 	// gets a planner and, when there are several approaches, a Symposium
 	Complexity string              `json:"complexity,omitempty"`
-	Roles      map[string]RoleSpec `json:"roles,omitempty"` // runtime, model and skills per role
-	Ship       string              `json:"ship,omitempty"`  // commit (the default), push or pr
+	Roles      map[string]RoleSpec `json:"roles,omitempty"`   // runtime, model and skills per role
+	Ship       string              `json:"ship,omitempty"`    // commit (the default), push or pr
+	Project    string              `json:"project,omitempty"` // the project's readable name, given once by the planner
 }
 
 type Job struct {
 	Spec
-	State    string    `json:"state"` // starting, building, checking, handoff, committing, shipping, done, failed
+	State    string    `json:"state"`           // starting, planning, building, checking, handoff, reviewing, committing, shipping, done; stuck waits for your guidance
+	Phase    string    `json:"phase,omitempty"` // the step a stuck job stopped at
 	Started  time.Time `json:"started"`
 	Branch   string    `json:"branch,omitempty"`
 	Commit   string    `json:"commit,omitempty"`
@@ -78,6 +80,13 @@ type Job struct {
 	grades        map[string]int
 	cwd           map[string]string // agent -> the worktree it works in
 	base          string            // the commit the job started from
+
+	alive       bool        // Run is going: a stuck job takes guidance at once
+	guide       chan string // your guidance for a stuck job
+	guidance    []string    // all of it so far
+	resume      *Resume     // set when the next run carries a stuck job on
+	lastFailure string      // the last failed check output
+	named       bool        // the planner gave the job its title
 }
 
 const (
@@ -184,7 +193,7 @@ func New(spec Spec, bus *events.Bus, rt runtime.Runtime) *Job {
 		spec.MaxReviews = 2
 	}
 	return &Job{Spec: spec, State: "starting", Started: time.Now(), bus: bus, rt: rt,
-		agents: map[string]runtime.Agent{}, handoffs: map[string]*handoff.Note{}, answers: make(chan string, 1),
+		agents: map[string]runtime.Agent{}, handoffs: map[string]*handoff.Note{}, answers: make(chan string, 1), guide: make(chan string, 1),
 		lead: builder, inExperiment: map[string]bool{}, labels: map[string]int{}, grades: map[string]int{}, cwd: map[string]string{}}
 }
 
@@ -272,23 +281,51 @@ func (j *Job) Stop() {
 	}
 }
 
-// Run takes the job from start to a commit, or to a failure.
+// Run takes the job to a commit. It never gives up on its own: when it
+// can't get further it gets stuck, tells you, and waits with its agents for
+// your guidance, then carries on. Only you stopping it ends Run; a stopped
+// job stays stuck and can still be guided on later.
 func (j *Job) Run(parent context.Context) {
 	ctx, cancel := context.WithCancel(parent)
-	j.cancel = cancel
 	j.mu.Lock()
-	j.ctx = ctx
+	j.cancel, j.ctx, j.alive, j.Error = cancel, ctx, true, ""
+	first := j.resume == nil
 	j.mu.Unlock()
 	defer cancel()
-	j.emit("", "job.started", map[string]any{"title": j.Title, "issue": j.Issue, "repo": j.Repo, "checks": j.Checks, "model": j.Model, "runtime": j.Runtime})
-	if err := j.run(ctx); err != nil {
+	if first {
+		j.emit("", "job.started", map[string]any{"title": j.Title, "issue": j.Issue, "repo": j.Repo, "project": j.Project, "checks": j.Checks, "model": j.Model, "runtime": j.Runtime})
+	}
+	for {
+		work, err := j.run(ctx)
+		if err == nil {
+			break
+		}
 		j.mu.Lock()
-		j.Error = err.Error()
+		phase := j.State
 		j.mu.Unlock()
-		j.set("failed")
-		j.emit("", "job.failed", map[string]any{"error": err.Error()})
+		if ctx.Err() != nil {
+			err = fmt.Errorf("you stopped the job")
+		}
+		j.stuck(phase, err, work)
+		if ctx.Err() != nil {
+			break
+		}
+		select {
+		case g := <-j.guide:
+			r := j.loadResume()
+			j.mu.Lock()
+			j.guidance = append(j.guidance, g)
+			r.Guidance = j.guidance
+			j.resume, j.Error, j.Phase = r, "", ""
+			j.mu.Unlock()
+		case <-ctx.Done():
+		}
+		if ctx.Err() != nil {
+			break
+		}
 	}
 	j.mu.Lock()
+	j.alive = false
 	for id, a := range j.agents {
 		a.Stop()
 		delete(j.agents, id)
@@ -296,34 +333,68 @@ func (j *Job) Run(parent context.Context) {
 	j.mu.Unlock()
 }
 
-func (j *Job) run(ctx context.Context) error {
+func (j *Job) takeResume() *Resume {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	r := j.resume
+	j.resume = nil
+	return r
+}
+
+// run is one go at the job: from the start, or, for a stuck job you
+// guided, from where it stopped. It returns the worktree the work is in.
+func (j *Job) run(ctx context.Context) (*workspace.Worktree, error) {
 	wt, err := workspace.Create(j.Repo, j.ID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	j.Worktree, j.Branch = wt.Path, wt.Branch
-	j.base, _ = wt.Head()
+	r := j.takeResume()
+	if j.base == "" && r != nil {
+		j.base = r.Base
+	}
+	if j.base == "" {
+		j.base, _ = wt.Head()
+	}
 	j.emit("", "workspace.ready", map[string]any{"path": wt.Path, "branch": wt.Branch})
 	scratch := filepath.Join(j.Dir(), "scratch")
 	os.MkdirAll(scratch, 0o755)
+
+	if r != nil { // carry a stuck job on with your guidance
+		work, a, commitOnly, err := j.carryOn(ctx, wt, r)
+		if err != nil {
+			return orWT(work, wt), err
+		}
+		if commitOnly {
+			return work, j.commit(wt, work, a)
+		}
+		if err := j.checkLoop(ctx, work, a, j.lead, false); err != nil {
+			return work, err
+		}
+		return work, j.finish(ctx, wt, work, a)
+	}
 
 	// the work that goes forward: the job's own worktree, or the winning
 	// experiment's after a Symposium
 	work, a := wt, runtime.Agent(nil)
 	var plan *handoff.Note
 
-	// complex work starts with a planner, who may open a Symposium
-	if reason := j.complexReason(); reason != "" {
+	// every job starts with the planner: it names the job, reads the code and
+	// plans; complex work may get a Symposium
+	reason := j.complexReason()
+	if reason != "" {
 		j.emit("", "complexity.signal", map[string]any{"reason": reason})
+	}
+	{
 		p, note, err := j.runPlanner(ctx, wt, reason)
 		if err != nil {
-			return err
+			return wt, err
 		}
 		plan = note
 		if p != nil {
 			win, err := j.symposium(ctx, wt, p, reason)
 			if err != nil {
-				return err
+				return wt, err
 			}
 			work, a = win.wt, win.agent
 		}
@@ -334,7 +405,7 @@ func (j *Job) run(ctx context.Context) error {
 		a, err = j.rt.Start(ctx, runtime.AgentSpec{Job: j.ID, Agent: builder, Cwd: wt.Path, Model: j.Model, System: prompts.For("builder"),
 			Role: "builder", Skills: skills.Dirs(j.Skills)})
 		if err != nil {
-			return fmt.Errorf("start builder: %w", err)
+			return wt, fmt.Errorf("start builder: %w", err)
 		}
 		j.mu.Lock()
 		j.agents[builder] = a
@@ -359,7 +430,7 @@ func (j *Job) run(ctx context.Context) error {
 			task += "\n\nIf the task turns out harder than it looks (several workable approaches and no clear best, or a vague ticket), call propose_experiments instead of guessing: the engine then tries the approaches side by side."
 		}
 		if _, err := j.ask(ctx, a, task); err != nil {
-			return fmt.Errorf("builder: %w", err)
+			return wt, fmt.Errorf("builder: %w", err)
 		}
 
 		// the builder found the task harder than it looked: Symposium
@@ -367,7 +438,7 @@ func (j *Job) run(ctx context.Context) error {
 			a.Stop()
 			win, err := j.symposium(ctx, wt, p, "the builder found several approaches")
 			if err != nil {
-				return err
+				return wt, err
 			}
 			work, a = win.wt, win.agent
 		} else {
@@ -382,23 +453,36 @@ func (j *Job) run(ctx context.Context) error {
 			if err == errSameFailure { // the same failure twice: ask the planner for approaches
 				p, _, perr := j.runPlanner(ctx, wt, "the same check failed the same way twice")
 				if perr != nil {
-					return perr
+					return wt, perr
 				}
 				if p == nil {
-					return fmt.Errorf("checks keep failing the same way and the planner saw no other approach")
+					j.set("checking") // stuck at the checks, not at the planning
+					return wt, fmt.Errorf("checks keep failing the same way and the planner saw no other approach")
 				}
 				a.Stop()
 				win, serr := j.symposium(ctx, wt, p, "the same check failed the same way twice")
 				if serr != nil {
-					return serr
+					return wt, serr
 				}
 				work, a = win.wt, win.agent
 			} else if err != nil {
-				return err
+				return wt, err
 			}
 		}
 	}
 
+	return work, j.finish(ctx, wt, work, a)
+}
+
+func orWT(work, wt *workspace.Worktree) *workspace.Worktree {
+	if work != nil {
+		return work
+	}
+	return wt
+}
+
+// finish takes checked work through the handoff and review to the commit.
+func (j *Job) finish(ctx context.Context, wt, work *workspace.Worktree, a runtime.Agent) error {
 	lead := j.lead
 	j.set("handoff")
 	if err := j.requireHandoff(ctx, lead, a); err != nil {
@@ -426,6 +510,11 @@ func (j *Job) run(ctx context.Context) error {
 		}
 	}
 
+	return j.commit(wt, work, a)
+}
+
+// commit makes the job's one commit, merges a winning experiment and ships.
+func (j *Job) commit(wt, work *workspace.Worktree, a runtime.Agent) error {
 	// only the engine commits: undo any commit an agent made on the job
 	// branch and keep its changes
 	if work == wt && j.base != "" {
@@ -445,7 +534,9 @@ func (j *Job) run(ctx context.Context) error {
 			return fmt.Errorf("merge the winning experiment: %w", err)
 		}
 		j.emit("", "symposium.merged", map[string]any{"from": work.Branch, "into": wt.Branch})
-		a.Stop()
+		if a != nil {
+			a.Stop()
+		}
 		work.Remove()
 	}
 	sha, err := wt.Head()
@@ -535,11 +626,17 @@ func (j *Job) checkLoop(ctx context.Context, wt *workspace.Worktree, a runtime.A
 		j.set("checking")
 		results := checks.Run(ctx, j.bus, j.ID, "oracle", wt.Path, j.Checks, 20*time.Minute)
 		if checks.AllPassed(results) {
+			j.mu.Lock()
+			j.lastFailure = ""
+			j.mu.Unlock()
 			j.emit("oracle", "checks.passed", map[string]any{"loop": loop})
 			break
 		}
 		j.emit("oracle", "checks.failed", map[string]any{"loop": loop})
 		failure := checks.Failures(results)
+		j.mu.Lock()
+		j.lastFailure = failure
+		j.mu.Unlock()
 		if watch && failure == last {
 			j.emit("oracle", "checks.same_failure", map[string]any{"loop": loop})
 			return errSameFailure
