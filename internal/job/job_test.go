@@ -200,3 +200,102 @@ func TestReviewerGrillsBuilder(t *testing.T) {
 		t.Fatalf("events %v", seen)
 	}
 }
+
+// committingRT plays a builder that commits its own work, which a ticket
+// without ship permission must not keep.
+type committingRT struct{ job *Job }
+
+func (f *committingRT) Start(_ context.Context, s runtime.AgentSpec) (runtime.Agent, error) {
+	return &committingAgent{rt: f, cwd: s.Cwd}, nil
+}
+
+type committingAgent struct {
+	rt  *committingRT
+	cwd string
+}
+
+func (a *committingAgent) Prompt(_ context.Context, text string) (string, error) {
+	os.WriteFile(filepath.Join(a.cwd, "app.txt"), []byte("done\n"), 0o644)
+	for _, args := range [][]string{{"add", "-A"}, {"commit", "-qm", "agent commit"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = a.cwd
+		cmd.Run()
+	}
+	a.rt.job.SaveHandoff(builder, &handoff.Note{From: builder, To: "reviewers", Did: "finished app.txt", Next: "review", Files: []string{"app.txt"}})
+	return "ok", nil
+}
+func (a *committingAgent) Steer(string) error { return nil }
+func (a *committingAgent) Stop() error        { return nil }
+
+func gitRepo(t *testing.T) string {
+	t.Helper()
+	repo := t.TempDir()
+	for _, args := range [][]string{{"init", "-q", "-b", "main"}, {"config", "user.email", "t@t"}, {"config", "user.name", "t"}, {"commit", "-q", "--allow-empty", "-m", "init"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repo
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v %s", err, out)
+		}
+	}
+	return repo
+}
+
+func gitOut(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v %s", args, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func TestDefaultShipCommitsOnceAfterAgentCommit(t *testing.T) {
+	repo := gitRepo(t)
+	base := gitOut(t, repo, "rev-parse", "HEAD")
+	bus := events.NewBus(t.TempDir())
+	rt := &committingRT{}
+	j := New(Spec{ID: "N1", Title: "make app", Repo: repo, Prompt: "write done into app.txt"}, bus, rt)
+	rt.job = j
+	bus.Place(j.ID, j.Dir())
+	j.Run(context.Background())
+
+	if j.State != "done" || j.Commit == "" || j.PR != "" {
+		t.Fatalf("state %s commit %q pr %q error %q", j.State, j.Commit, j.PR, j.Error)
+	}
+	if parent := gitOut(t, j.Worktree, "rev-parse", "HEAD~1"); parent != base {
+		t.Fatalf("want one engine commit on top of %s, parent is %s", base, parent)
+	}
+	if msg := gitOut(t, j.Worktree, "log", "-1", "--format=%s"); msg != "N1: make app" {
+		t.Fatalf("commit message %q", msg)
+	}
+	log, _ := bus.Replay(j.ID)
+	seen := map[string]bool{}
+	for _, e := range log {
+		seen[e.Type] = true
+	}
+	if !seen["ship.uncommitted"] || !seen["job.committed"] || seen["job.pushed"] {
+		t.Fatalf("events %v", seen)
+	}
+}
+
+func TestShipPushSendsBranchToOrigin(t *testing.T) {
+	repo := gitRepo(t)
+	remote := t.TempDir()
+	gitOut(t, remote, "init", "-q", "--bare")
+	gitOut(t, repo, "remote", "add", "origin", remote)
+	bus := events.NewBus(t.TempDir())
+	rt := &committingRT{}
+	j := New(Spec{Ship: "push", ID: "P1", Title: "make app", Repo: repo, Prompt: "write done into app.txt"}, bus, rt)
+	rt.job = j
+	bus.Place(j.ID, j.Dir())
+	j.Run(context.Background())
+
+	if j.State != "done" || j.Commit == "" {
+		t.Fatalf("state %s commit %q error %q", j.State, j.Commit, j.Error)
+	}
+	if got := gitOut(t, remote, "rev-parse", "--short", "factory/P1"); !strings.HasPrefix(j.Commit, got[:7]) {
+		t.Fatalf("origin has %s, job committed %s", got, j.Commit)
+	}
+}

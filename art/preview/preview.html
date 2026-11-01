@@ -118,7 +118,7 @@
   .legend .item canvas { image-rendering:pixelated }
   .legend .item b { font:11px Silkscreen, monospace; display:block }
   .legend .item span { font-size:12.5px; color:var(--soft) }
-  .procs, .chron { width:520px }
+  .procs, .chron { width:520px; bottom:calc(var(--bottom, 80px) + 84px) } /* clear of Homer in the corner */
   .legend .sum { padding:8px 12px; font-size:12.5px; border-bottom:2px solid var(--line); display:flex; gap:12px; flex-wrap:wrap; align-items:center }
   .legend .sum b { font:11px Silkscreen, monospace }
   .legend .sum .x { margin-left:auto }
@@ -147,9 +147,16 @@
   #narr .who { font:10px Silkscreen, monospace; color:var(--accent); display:flex; justify-content:space-between; gap:8px }
   #narr .who span { color:var(--soft) }
   #narr .txt { font-size:15px; line-height:1.4; min-height:1.4em }
-  .chron .entry { padding:7px 10px; border-left:3px solid var(--line); margin:6px 6px 0; font-size:13.5px; line-height:1.4 }
+  .chron .entry { padding:7px 10px; border-left:3px solid var(--line); margin:6px 6px 0; font-size:13.5px; line-height:1.45; overflow-wrap:anywhere }
   .chron .entry.now { border-left-color:var(--gold) }
+  .chron .entry.ok { border-left-color:var(--ok) }
+  .chron .entry.fail { border-left-color:var(--fail) }
+  .chron .entry.ship { border-left-color:var(--accent); background:color-mix(in srgb, var(--accent) 7%, var(--card)) }
   .chron .entry small { display:block; color:var(--soft); font:10px Silkscreen, monospace; margin-bottom:2px }
+  .chron .entry .body.clamp { display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden }
+  .chron .entry .more { border:0; background:none; padding:2px 0 0; font:10px Silkscreen, monospace; color:var(--accent); cursor:pointer }
+  .chron code, #thoughts code { font:12px "JetBrains Mono", monospace; background:var(--bg); padding:0 4px; border-radius:2px }
+  .chron a { color:var(--accent) }
   .legend .group { font:10px Silkscreen, monospace; color:var(--accent); margin:10px 6px 2px }
   .zoom { position:absolute; right:12px; transition:right .38s cubic-bezier(.2,.8,.2,1); bottom:calc(var(--bottom, 80px) + 12px); display:flex; gap:4px; z-index:5 }
   .zoom button { width:34px; padding:5px 0 }
@@ -179,7 +186,7 @@
             transition:transform .38s cubic-bezier(.2,.8,.2,1), opacity .25s ease, visibility 0s linear .38s }
   #drawer.open ~ .zoom, .zoom.shift { right:calc(min(380px, 100%) + 12px) }
   #drawer.open { transform:none; opacity:1; visibility:visible; transition:transform .38s cubic-bezier(.2,.8,.2,1), opacity .25s ease, visibility 0s }
-  #drawer .dc { display:flex; flex-direction:column; min-height:0; flex:1; transition:opacity .16s ease }
+  #drawer .dc { display:flex; flex-direction:column; min-height:0; min-width:0; flex:1; overflow:hidden; transition:opacity .16s ease }
   #drawer .dc.fade { opacity:0 }
   .dh { display:flex; gap:12px; align-items:center; padding:12px 14px; border-bottom:2px solid var(--line) }
   .dh canvas { width:96px; height:96px; image-rendering:pixelated; flex-shrink:0 }
@@ -187,12 +194,18 @@
   .dh .meta { font-size:12px; color:var(--soft) }
   .dh .x { margin-left:auto; align-self:flex-start }
   .facts { display:grid; grid-template-columns:auto 1fr; gap:2px 12px; padding:10px 14px; font-size:13px; border-bottom:2px solid var(--line) }
+  .facts > * { min-width:0; overflow-wrap:anywhere }
   .facts span:nth-child(odd) { color:var(--soft) }
   .facts code { font:12px "JetBrains Mono", monospace }
   .th { font:11px Silkscreen, monospace; padding:10px 14px 4px; display:flex; justify-content:space-between }
   .th i { font-style:normal; color:var(--think) }
-  #thoughts { flex:1; min-height:120px; overflow-y:auto; padding:0 14px 10px; font:12.5px/1.5 "JetBrains Mono", monospace }
-  #thoughts p { margin:0 0 8px; padding-left:10px; border-left:2px solid var(--line) }
+  #dprocs { max-height:150px; overflow-y:auto; flex-shrink:0 }
+  #drawer .th small { font:10px Inter, sans-serif; color:var(--soft) }
+  #thoughts { flex:1; min-height:160px; overflow-y:auto; overflow-x:hidden; padding:0 14px 10px; font:13px/1.5 Inter, sans-serif }
+  #thoughts p { margin:0 0 8px; padding-left:10px; border-left:2px solid var(--line); white-space:pre-wrap; overflow-wrap:anywhere }
+  #thoughts p.tool { margin:0 0 3px; border-left-color:transparent; color:var(--soft); font:11.5px/1.45 "JetBrains Mono", monospace; white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+  #thoughts p.tool::before { content:'› '; color:var(--accent) }
+  #thoughts p.out { font:11.5px/1.45 "JetBrains Mono", monospace; background:var(--bg); border-left-color:var(--fail); padding:4px 8px; max-height:180px; overflow:auto; white-space:pre; overflow-wrap:normal }
   #thoughts p.you { border-left-color:var(--think); background:var(--you); padding:4px 8px }
   #thoughts p.ack { border-left-color:var(--think) }
   #thoughts p.heard { border-left-color:var(--gold); color:var(--soft) }
@@ -419,10 +432,11 @@ const NARR = {
   idle:      '{id} is done. The ticket moved to In Review, and {city} is quiet again.',
 };
 let narrTimer = null;
-function narrate(text, j = cur, log = true) {
+function narrate(text, j = cur, log = true, kind = '') {
   if (!text) return;
   text = text.replace(/\{id\}/g, j.id).replace(/\{city\}/g, j.city);
-  if (log) { (j.chron ||= []).unshift({ text, at:new Date() }); j.chron.splice(60); }
+  if (log) { (j.chron ||= []).unshift({ text, kind, at:new Date() }); j.chron.splice(60); }
+  text = text.replace(/[\u0001\u0002]/g, '');
   if (document.getElementById('chron').classList.contains('open')) renderChron();
   if (mode === 'city' && j !== cur) return;
   document.getElementById('narr-where').textContent = j.city + ' · ' + new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
@@ -430,11 +444,20 @@ function narrate(text, j = cur, log = true) {
   const el = document.getElementById('narr-txt'); clearTimeout(narrTimer);
   let i = 0; const tick = () => { el.textContent = text.slice(0, i += 2); if (i < text.length) narrTimer = setTimeout(tick, 16); }; tick();
 }
+// chronicle text is escaped; code(...) spans become code and https links become links.
+// The markers are control characters, so a command's own backticks stay as they are.
+const code = c => '\u0001' + c + '\u0002';
+const escHTML = s => String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+const chronHTML = s => escHTML(s).replace(/\u0001([^\u0002]*)\u0002/g, '<code>$1</code>').replace(/https:\/\/[^\s<)]+[^\s<).,;]/g, u => `<a href="${u}" target="_blank" rel="noopener">${u}</a>`);
 function renderChron() {
   const box = document.getElementById('chron'), order = [cur, ...JOBS.filter(j => j !== cur)];
-  box.innerHTML = `<div class="sum"><b>Chronicle</b><span>What happened and why, newest first</span><button class="x">Hide</button></div><div class="list">${order.map(j =>
-    `<div class="group">${j.city} · ${j.id}</div>` + ((j.chron || []).length ? j.chron.map((c, i) => `<div class="entry${i === 0 ? ' now' : ''}"><small>${c.at.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' })}</small>${c.text}</div>`).join('') : '<div class="entry">Nothing yet.</div>')).join('')}</div>`;
+  const keep = box.querySelector('.list')?.scrollTop || 0;
+  box.innerHTML = `<div class="sum"><b>Chronicle</b><span>What happened and why, newest first</span><button class="x">Hide</button></div><div class="list">${order.map((j, ji) =>
+    `<div class="group">${j.city} · ${j.id}</div>` + ((j.chron || []).length ? j.chron.map((c, i) => { const long = c.text.length > 240;
+      return `<div class="entry${i === 0 ? ' now' : ''} ${c.kind || ''}"><small>${c.at.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' })}</small><div class="body${long && !c.open ? ' clamp' : ''}">${chronHTML(c.text)}</div>${long ? `<button class="more" data-j="${ji}" data-i="${i}">${c.open ? 'Less' : 'More'}</button>` : ''}</div>`; }).join('') : '<div class="entry">Nothing yet.</div>')).join('')}</div>`;
+  box.querySelector('.list').scrollTop = keep;
   box.querySelector('.x').onclick = () => setChron(false);
+  box.querySelectorAll('.more').forEach(b => b.onclick = () => { const c = order[b.dataset.j].chron[b.dataset.i]; c.open = !c.open; renderChron(); });
 }
 function setChron(open) {
   document.getElementById('chron').classList.toggle('open', open); document.getElementById('chron-btn').classList.toggle('on', open);
@@ -1012,7 +1035,7 @@ function buildDrawer(id) {
   const rtLine = lr ? `${{ pi:'Pi', 'claude-code':'Claude Code', codex:'Codex' }[lr.runtime] || lr.runtime || ''} · ${(lr.model || '').split('/').pop()}` : RUNTIME[p.Role];
   drawer.innerHTML = `<div class="dc fade"><div class="dh"><canvas width="144" height="144" id="pc"></canvas><div><h2>${p.Name}</h2><div class="meta">${p.Role}<br>${rtLine}</div></div><button class="x" id="dx">Close</button></div>
     <div class="facts" id="facts"></div>
-    <div class="th"><span>Processes and pods</span></div><div id="dprocs" style="padding:0 14px 6px"></div>
+    <div class="th"><span>Processes and pods</span><small id="dprocs-n"></small></div><div id="dprocs" style="padding:0 14px 6px"></div>
     <div class="th"><span>Thoughts</span><i id="live">live</i></div><div id="thoughts"></div>
     <form class="send" id="send"><textarea id="msg" placeholder="Tell ${p.Name} something. It interrupts the current step."></textarea>
     <div style="display:flex;justify-content:space-between;align-items:center"><small>Enter to send, Shift+Enter for a new line</small><button type="submit">Send</button></div></form></div>`;
@@ -1025,7 +1048,7 @@ function buildDrawer(id) {
   const ta = document.getElementById('msg');
   ta.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); document.getElementById('send').requestSubmit(); } };
   document.getElementById('send').onsubmit = e => { e.preventDefault(); const t = ta.value.trim(); if (!t) return; ta.value = ''; sendUFO(id, t); };
-  const list = document.getElementById('thoughts'); (thoughts[id] || []).forEach(t => renderThought(t, false));
+  const list = document.getElementById('thoughts'); delete list.dataset.last; (thoughts[id] || []).forEach(t => renderThought(t, false)); list.scrollTop = list.scrollHeight;
   if (!(thoughts[id] || []).length) list.innerHTML = '<p>Nothing yet.</p>';
   drawerFacts(); drawerProcs();
 }
@@ -1041,11 +1064,21 @@ function renderThought(t, typed) {
   const list = document.getElementById('thoughts'); if (!list) return;
   if (list.firstChild && list.firstChild.textContent === 'Nothing yet.') list.innerHTML = '';
   const p = document.createElement('p'); p.className = t.kind;
-  const label = t.kind === 'you' ? 'You' : t.at.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' });
-  p.innerHTML = `<span class="t"></span><span class="x"></span>`; p.firstChild.textContent = label; list.appendChild(p);
+  const time = t.at.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+  // only stick to the bottom when you are already there, so reading back isn't interrupted
+  const atEnd = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
+  const follow = () => { if (atEnd) list.scrollTop = list.scrollHeight; };
+  if (t.kind === 'tool' || t.kind === 'out') { // tool calls and output: compact, no typing, time on hover
+    p.textContent = t.text; p.title = time + (t.kind === 'tool' ? ' · ' + t.text : ''); list.appendChild(p); follow(); return;
+  }
+  // a time label only when a minute or more has passed since the last one
+  const last = list.dataset.last ? +list.dataset.last : 0, showTime = t.kind === 'you' || t.at - last >= 60000;
+  if (showTime && t.kind !== 'you') list.dataset.last = +t.at;
+  p.innerHTML = `<span class="t"></span><span class="x"></span>`; p.firstChild.textContent = t.kind === 'you' ? 'You' : showTime ? time : ''; list.appendChild(p);
+  if (!p.firstChild.textContent) p.firstChild.remove();
   const body = p.lastChild;
-  if (!typed || t.kind === 'you') { body.textContent = t.text; list.scrollTop = list.scrollHeight; return; }
-  let i = 0; const tick = () => { body.textContent = t.text.slice(0, ++i); list.scrollTop = list.scrollHeight; if (i < t.text.length) setTimeout(tick, 14); }; tick();
+  if (!typed || t.kind === 'you') { body.textContent = t.text; follow(); return; }
+  let i = 0; const tick = () => { body.textContent = t.text.slice(0, i += 3); follow(); if (i < t.text.length) setTimeout(tick, 14); }; tick();
 }
 
 // ---------- controls ----------
@@ -1243,7 +1276,8 @@ function renderProcs() {
 function drawerProcs() {
   const el = document.getElementById('dprocs'); if (!el) return;
   const mine = procs.filter(p => p.agent === selected);
-  el.innerHTML = mine.length ? mine.slice(0, 6).map(p => procRow(p, cur, false)).join('') : '<div class="prow"><span></span><span class="meta">No processes yet.</span></div>';
+  el.innerHTML = mine.length ? mine.slice(0, 20).map(p => procRow(p, cur, false)).join('') : '<div class="prow"><span></span><span class="meta">No processes yet.</span></div>';
+  const n = document.getElementById('dprocs-n'), on = running(mine).length; if (n) n.textContent = mine.length ? `${on} running · ${mine.length} in all` : '';
   wireStops(el, procs);
 }
 function setLegend(open) {
@@ -1279,8 +1313,8 @@ requestAnimationFrame(frame);
 // Served by `factory serve`, the page reads real jobs and their events.
 // Served any other way, it keeps the demo above.
 const CITIES = ['Athens', 'Corinth', 'Miletus', 'Thebes', 'Argos', 'Rhodes', 'Delphi', 'Sparta', 'Ephesus', 'Syracuse', 'Knossos', 'Megara'];
-const LIVE_LABEL = { starting:'Starting', planning:'Plan', symposium:'Symposium', grading:'Grading experiments', building:'Build', checking:'Checks running', handoff:'Handoff', reviewing:'Review', committing:'Ship', done:'Done', failed:'Failed', waiting:'Needs you', interrupted:'Interrupted' };
-const LIVE_AT = { starting:'gates', planning:'academy', symposium:'symposium', grading:'symposium', building:'workshop', checking:'oracle', handoff:'workshop', reviewing:'areopagus', committing:'harbour', failed:'agora', waiting:'agora', interrupted:'agora' };
+const LIVE_LABEL = { starting:'Starting', planning:'Plan', symposium:'Symposium', grading:'Grading experiments', building:'Build', checking:'Checks running', handoff:'Handoff', reviewing:'Review', committing:'Ship', shipping:'Ship', done:'Done', failed:'Failed', waiting:'Needs you', interrupted:'Interrupted' };
+const LIVE_AT = { starting:'gates', planning:'academy', symposium:'symposium', grading:'symposium', building:'workshop', checking:'oracle', handoff:'workshop', reviewing:'areopagus', committing:'harbour', shipping:'harbour', failed:'agora', waiting:'agora', interrupted:'agora' };
 const pageStart = Date.now();
 const BUILDER = 'archimedes', REVIEWER = 'socrates', PLANNER = 'aristotle', GRADER = 'zeno';
 
@@ -1308,7 +1342,7 @@ function liveSetup(j) {
     : L.state === 'reviewing' ? [[REVIEWER, 'areopagus', L.rthinking ? 'thinking' : 'tool', L.rmsg || 'Reading the work'], [lead, 'areopagus', L.grilled ? 'tool' : 'waiting', L.msg || 'Waiting for questions']]
     : [[lead, at, st, L.msg || '']];
   SETUPS['live:' + j.id] = { label:L.shipping ? 'Ship' : LIVE_LABEL[L.state] || L.state, desc:'', bldg, agents:agentsHere, ship:!!L.shipping, shipBy:lead,
-    at:{ checking:'oracle', building:'workshop', handoff:'workshop', committing:'harbour', starting:'gates', reviewing:'areopagus', planning:'academy', symposium:'academy', grading:'academy' }[L.state] };
+    at:{ checking:'oracle', building:'workshop', handoff:'workshop', committing:'harbour', shipping:'harbour', starting:'gates', reviewing:'areopagus', planning:'academy', symposium:'academy', grading:'academy' }[L.state] };
   return 'live:' + j.id;
 }
 function refresh(j, structural) {
@@ -1324,8 +1358,12 @@ const shortPaths = (L, text) => {
   if (!text || !L.worktree) return text;
   let t = String(text);
   const jobDir = L.worktree.replace('/.factory/worktrees/', '/.factory/jobs/');
-  for (const pre of ['/private', '']) t = t.split(pre + jobDir + '/').join('').split(pre + L.worktree + '/').join('').split(pre + L.worktree).join('.');
-  return t;
+  const repo = L.worktree.includes('/.factory/worktrees/') ? L.worktree.split('/.factory/worktrees/')[0] : ''; // only an absolute repo root is safe to strip
+  for (const pre of ['/private', '']) {
+    t = t.split(pre + jobDir + '/').join('').split(pre + L.worktree + '/').join('').split(pre + L.worktree).join('.');
+    if (repo.startsWith('/')) t = t.split(pre + repo + '/').join('').split(pre + repo).join('.');
+  }
+  return t.replace(/\/(Users|home)\/[^/\s]+\//g, '~/');
 };
 const summarise = (tool, args) => {
   args = args || {};
@@ -1348,10 +1386,10 @@ function onEvent(j, e) {
   // a speech bubble for a few seconds, for the question-and-answer in review
   const speak = (id, text) => { if (!here || old) return; const g = agents[id]; if (!g) return; g.say = text.length > 170 ? text.slice(0, 169) + '…' : text; g.talking = true;
     setTimeout(() => { if (g.say && text.startsWith(g.say.slice(0, 20))) { g.say = null; g.talking = false; } }, 9000); };
-  const say = text => { if (!old) narrate(text, j); else (j.chron ||= []).unshift({ text, at:new Date(e.time) }); };
+  const say = (text, kind = '') => { if (!old) narrate(text, j, true, kind); else (j.chron ||= []).unshift({ text, kind, at:new Date(e.time) }); };
   const d = e.data || {};
   switch (e.type) {
-    case 'job.started': j.title = d.title || j.title; hud(); say(`${d.issue || j.id} arrived at the Gates of ${j.city}: ${d.title}. The checks for this job: ${(d.checks || []).join(', ') || 'none picked'}.`); break;
+    case 'job.started': j.title = d.title || j.title; hud(); say(`${d.issue || j.id} arrived at the Gates of ${j.city}: ${d.title}. The checks for this job: ${(d.checks || []).map(code).join(', ') || 'none picked'}.`); break;
     case 'job.state': L.state = d.state; if (d.state === 'building') L.oracle = L.oracle === 'fail' ? 'fail' : null;
       if (d.state === 'waiting') { L.msg = 'Needs you: ' + (L.question || 'click me to answer'); say(`${j.city} waits for you. Archimedes asks: ${L.question}. Click him and reply.`); }
       refresh(j, true); return;
@@ -1360,7 +1398,7 @@ function onEvent(j, e) {
       L.model = d.model; say(`Archimedes starts work: ${{ pi:'Pi', 'claude-code':'Claude Code', codex:'Codex' }[d.runtime] || d.runtime} with ${String(d.model).split('/')[1]}.`); L.runtime = d.runtime; break;
     case 'agent.status': if (d.step && other) { mine().msg = d.step; mine().thinking = false; break; } if (d.step) { if (rev) { L.rmsg = d.step; L.rthinking = false; } else { L.msg = d.step; L.thinking = false; } } break;
     case 'agent.tool': {
-      const t = shortPaths(L, summarise(d.tool, d.args)); if (t && other) { mine().msg = t; mine().thinking = false; think('Tool: ' + t); } else if (t) { if (rev) { L.rmsg = t; L.rthinking = false; } else { L.msg = t; L.thinking = false; } think('Tool: ' + t); }
+      const t = shortPaths(L, summarise(d.tool, d.args)); if (t && other) { mine().msg = t; mine().thinking = false; think(t, 'tool'); } else if (t) { if (rev) { L.rmsg = t; L.rthinking = false; } else { L.msg = t; L.thinking = false; } think(t, 'tool'); }
       if (d.tool === 'bash' && d.args?.command) list.unshift({ agent:e.agent || BUILDER, kind:'proc', name:'bash', cmd:shortPaths(L, d.args.command), pid:'tool', status:'running', started:new Date(e.time).getTime(), cpu:0, mem:0, tool:true });
       break; }
     case 'agent.tool.done': if (d.tool === 'bash') { const p = list.find(q => q.tool && q.status === 'running'); if (p) { p.status = d.error ? 'failed' : 'exited'; p.exitCode = d.error ? 1 : 0; p.ended = new Date(e.time).getTime(); } } break;
@@ -1368,8 +1406,8 @@ function onEvent(j, e) {
     case 'agent.text': think(shortPaths(L, d.text), 'ack'); break;
     case 'usage': costs[who_] = (costs[who_] || 0) + (d.usd || 0); break;
     case 'check.started': if (other) { mine().msg = 'checking: ' + d.command; break; } L.oracle = 'running'; L.msg = 'checking: ' + d.command; refresh(j, true); return;
-    case 'check.failed': if (other) { mine().msg = `${d.command} failed`; break; } L.oracle = 'fail'; L.msg = `${d.command} failed (exit ${d.exit_code})`; say(`Red smoke over Delphi: ${d.command} failed. The failure output goes back to Archimedes at the Workshop.`); think('Check failed:\n' + String(d.output || '').split('\n').slice(-12).join('\n')); refresh(j, true); return;
-    case 'check.passed': if (other) { mine().msg = `${d.command} passed`; break; } L.oracle = 'pass'; L.msg = `${d.command} passed`; say(`Green smoke over Delphi: ${d.command} passed.`); refresh(j, true); return;
+    case 'check.failed': if (other) { mine().msg = `${d.command} failed`; break; } L.oracle = 'fail'; L.msg = `${d.command} failed (exit ${d.exit_code})`; say(`Red smoke over Delphi: ${code(d.command)} failed (exit ${d.exit_code}). The output goes back to Archimedes at the Workshop.`, 'fail'); think(`Check failed: ${d.command}`); think(shortPaths(L, String(d.output || '').split('\n').slice(-12).join('\n')), 'out'); refresh(j, true); return;
+    case 'check.passed': if (other) { mine().msg = `${d.command} passed`; break; } L.oracle = 'pass'; L.msg = `${d.command} passed`; say(`Green smoke over Delphi: ${code(d.command)} passed.`, 'ok'); refresh(j, true); return;
     case 'proc.started': list.unshift({ agent:BUILDER, kind:d.kind || 'proc', name:String(d.command).split(' ')[0], cmd:d.command, pid:String(d.pid), status:'running', started:new Date(e.time).getTime(), cpu:0, mem:0 }); break;
     case 'proc.exited': { const p = list.find(q => q.pid === String(d.pid)); if (p) { p.status = d.exit_code === 0 ? 'exited' : 'failed'; p.exitCode = d.exit_code; p.ended = new Date(e.time).getTime(); } break; }
     case 'handoff.written': {
@@ -1400,17 +1438,20 @@ function onEvent(j, e) {
       say(d.approved ? `Socrates approves the work${d.summary ? ': ' + d.summary : '.'}` : `Socrates sends the work back to the Workshop: ${(d.findings || []).join(' · ')}`);
       think((d.approved ? 'Verdict: approved. ' : 'Verdict: blocking. ') + (d.findings || []).join(' · ') + (d.summary ? ' ' + d.summary : ''), 'ack', REVIEWER); break;
     case 'review.no_verdict': say('Socrates finished without a verdict, so the engine asked him for one.'); break;
-    case 'checks.planned': say(`Archimedes read your test notes and named the checks: ${(d.commands || []).join(', ')}. The Oracle will run them.`); think('Checks I named: ' + (d.commands || []).join('; ')); break;
+    case 'checks.planned': say(`Archimedes read your test notes and named the checks: ${(d.commands || []).map(code).join(', ')}. The Oracle will run them.`); think('Checks I named: ' + (d.commands || []).join('; ')); break;
     case 'checks.none': say(`No checks were named, so ${j.id} will finish without the Oracle. Review it by hand.`); break;
     case 'handoff.blocked': L.question = (d.open_questions || []).join(' '); break;
     case 'handoff.answered': L.msg = 'Thanks, carrying on'; say(`You answered Archimedes: "${d.answer}". The job goes on.`); break;
     case 'handoff.missing': L.msg = 'writing my handoff (it was missing)'; say('Archimedes finished without a handoff note, so the engine sent him back to write it.'); break;
     case 'workspace.blocked_write': say(`Archimedes changed test files (${(d.files || []).join(', ')}). The engine undid it: agents don't edit tests.`); break;
     case 'human.message': say(`You sent Archimedes a message: "${d.text}".`); break;
-    case 'job.committed': say(`Committed ${d.sha} on ${d.branch}. The ship sails with the work.`);
+    case 'ship.uncommitted': say(`Archimedes had committed on his own. The engine undid that commit and kept the changes, so it makes the one commit itself.`); break;
+    case 'job.pushed': say(`Pushed ${code(d.branch)} to origin.`, 'ship'); break;
+    case 'job.pr_opened': j.pr = d.url; say(`Pull request opened: ${d.url}`, 'ship'); break;
+    case 'job.committed': say(`Committed ${code(d.sha)} on ${code(d.branch)}. The ship sails with the work.`, 'ship');
       if (!old) { L.shipping = true; refresh(j, true); setTimeout(() => { L.shipping = false; refresh(j, true); }, 16000); return; } break;
-    case 'job.done': L.state = 'done'; say(`${j.id} is done. ${j.city} is quiet again.`); refresh(j, true); return;
-    case 'job.failed': L.state = 'failed'; L.msg = 'Job failed: ' + d.error; say(`${j.id} failed: ${d.error}`); refresh(j, true); return;
+    case 'job.done': L.state = 'done'; say(`${j.id} is done. ${j.city} is quiet again.`, 'ok'); refresh(j, true); return;
+    case 'job.failed': L.state = 'failed'; L.msg = 'Job failed: ' + d.error; say(`${j.id} failed: ${d.error}`, 'fail'); refresh(j, true); return;
     default: return;
   }
   refresh(j, false);

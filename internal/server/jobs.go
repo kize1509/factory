@@ -33,7 +33,7 @@ func (s *Server) LoadJobs() {
 		}
 		j := job.New(spec, s.Bus, s.Runtimes[spec.Runtime])
 		s.Bus.Place(j.ID, j.Dir())
-		j.State, j.Branch, j.Commit, j.Error, j.Started = row.State, row.Branch, row.Commit, row.Error, row.Started
+		j.State, j.Branch, j.Commit, j.PR, j.Error, j.Started = row.State, row.Branch, row.Commit, row.PR, row.Error, row.Started
 		if j.State != "done" && j.State != "failed" {
 			j.State = "interrupted"
 		}

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -28,6 +29,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   state    TEXT,
   branch   TEXT,
   commit_sha TEXT,
+  pr_url   TEXT,                   -- the job's pull request, once opened
   error    TEXT,
   started  TEXT,
   updated  TEXT
@@ -65,13 +67,19 @@ func Open(path string) (*Store, error) {
 	if _, err := db.Exec(schema); err != nil {
 		return nil, fmt.Errorf("schema: %w", err)
 	}
+	// columns added after the first release; an existing database gets them here
+	for _, col := range []string{"pr_url TEXT"} {
+		if _, err := db.Exec(`ALTER TABLE jobs ADD COLUMN ` + col); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+			return nil, fmt.Errorf("add column %s: %w", col, err)
+		}
+	}
 	return &Store{db: db}, nil
 }
 
 func (s *Store) Close() error { return s.db.Close() }
 
-// AddEvent stores one event, keeps the job row's state, branch, commit and
-// error in step with it, and returns the event's sequence number.
+// AddEvent stores one event, keeps the job row's state, branch, commit, PR
+// and error in step with it, and returns the event's sequence number.
 func (s *Store) AddEvent(e events.Event) int64 {
 	data, _ := json.Marshal(e.Data)
 	t := e.Time.Format(time.RFC3339Nano)
@@ -91,6 +99,8 @@ func (s *Store) AddEvent(e events.Event) int64 {
 		s.db.Exec(`UPDATE jobs SET branch=?, updated=? WHERE id=?`, str("branch"), t, e.Job)
 	case "job.committed":
 		s.db.Exec(`UPDATE jobs SET commit_sha=?, updated=? WHERE id=?`, str("sha"), t, e.Job)
+	case "job.pr_opened":
+		s.db.Exec(`UPDATE jobs SET pr_url=?, updated=? WHERE id=?`, str("url"), t, e.Job)
 	case "job.failed":
 		s.db.Exec(`UPDATE jobs SET error=?, updated=? WHERE id=?`, str("error"), t, e.Job)
 	}
@@ -162,9 +172,9 @@ func (s *Store) HasEvents(job string) bool {
 
 // JobRow is one job as stored.
 type JobRow struct {
-	ID, Issue, Title, Repo, State, Branch, Commit, Error string
-	Spec                                                 json.RawMessage
-	Started                                              time.Time
+	ID, Issue, Title, Repo, State, Branch, Commit, PR, Error string
+	Spec                                                     json.RawMessage
+	Started                                                  time.Time
 }
 
 func (s *Store) SaveJob(id, issue, title, repo string, spec any, started time.Time) error {
@@ -177,7 +187,7 @@ func (s *Store) SaveJob(id, issue, title, repo string, spec any, started time.Ti
 
 func (s *Store) Jobs() ([]JobRow, error) {
 	rows, err := s.db.Query(`SELECT id, COALESCE(issue,''), COALESCE(title,''), COALESCE(repo,''), spec, COALESCE(state,''),
-		COALESCE(branch,''), COALESCE(commit_sha,''), COALESCE(error,''), COALESCE(started,'') FROM jobs ORDER BY started`)
+		COALESCE(branch,''), COALESCE(commit_sha,''), COALESCE(pr_url,''), COALESCE(error,''), COALESCE(started,'') FROM jobs ORDER BY started`)
 	if err != nil {
 		return nil, err
 	}
@@ -186,7 +196,7 @@ func (s *Store) Jobs() ([]JobRow, error) {
 	for rows.Next() {
 		var j JobRow
 		var spec, started string
-		if err := rows.Scan(&j.ID, &j.Issue, &j.Title, &j.Repo, &spec, &j.State, &j.Branch, &j.Commit, &j.Error, &started); err != nil {
+		if err := rows.Scan(&j.ID, &j.Issue, &j.Title, &j.Repo, &spec, &j.State, &j.Branch, &j.Commit, &j.PR, &j.Error, &started); err != nil {
 			return nil, err
 		}
 		j.Spec = json.RawMessage(spec)

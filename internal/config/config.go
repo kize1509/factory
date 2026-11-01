@@ -23,12 +23,32 @@ type Project struct {
 }
 
 const Template = `# Factory settings for this repo. See docs/PRD.md §13.
-ship: commit              # commit | push | pr
+ship: commit              # commit | push | pr; a ticket's Ship mode field wins
 checks:
   saved_plan: []          # e.g. ["go test ./..."]; empty means the job asks
 limits:
   build_loops: 4
 `
+
+// ShipModes are the ways a job's work can leave the factory.
+var ShipModes = []string{"commit", "push", "pr"}
+
+// ShipMode picks how a job ships: the ticket's Ship mode first, then the
+// repo's factory.yml, then commit. It returns "" for a value that isn't
+// a ship mode.
+func ShipMode(ticket, project string) string {
+	for _, m := range []string{ticket, project} {
+		if m = strings.ToLower(strings.TrimSpace(m)); m != "" {
+			for _, ok := range ShipModes {
+				if m == ok {
+					return m
+				}
+			}
+			return ""
+		}
+	}
+	return "commit"
+}
 
 func LoadProject(repo string) (Project, error) {
 	var p Project

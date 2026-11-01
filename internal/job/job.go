@@ -43,14 +43,16 @@ type Spec struct {
 	// gets a planner and, when there are several approaches, a Symposium
 	Complexity string              `json:"complexity,omitempty"`
 	Roles      map[string]RoleSpec `json:"roles,omitempty"` // runtime, model and skills per role
+	Ship       string              `json:"ship,omitempty"`  // commit (the default), push or pr
 }
 
 type Job struct {
 	Spec
-	State    string    `json:"state"` // starting, building, checking, handoff, committing, done, failed
+	State    string    `json:"state"` // starting, building, checking, handoff, committing, shipping, done, failed
 	Started  time.Time `json:"started"`
 	Branch   string    `json:"branch,omitempty"`
 	Commit   string    `json:"commit,omitempty"`
+	PR       string    `json:"pr,omitempty"` // the pull request's URL
 	Error    string    `json:"error,omitempty"`
 	Worktree string    `json:"worktree,omitempty"`
 
@@ -424,6 +426,16 @@ func (j *Job) run(ctx context.Context) error {
 		}
 	}
 
+	// only the engine commits: undo any commit an agent made on the job
+	// branch and keep its changes
+	if work == wt && j.base != "" {
+		if head, _ := wt.Head(); head != j.base {
+			if err := wt.Uncommit(j.base); err != nil {
+				return fmt.Errorf("undo the agent's commits: %w", err)
+			}
+			j.emit("", "ship.uncommitted", map[string]any{"from": head, "to": j.base})
+		}
+	}
 	j.set("committing")
 	if _, err := work.Commit(fmt.Sprintf("%s: %s", j.ID, j.Title)); err != nil && work == wt {
 		return err
@@ -445,9 +457,67 @@ func (j *Job) run(ctx context.Context) error {
 	}
 	j.Commit = sha
 	j.emit("", "job.committed", map[string]any{"sha": sha, "branch": wt.Branch})
+	if err := j.ship(wt); err != nil {
+		return err
+	}
 	j.set("done")
 	j.emit("", "job.done", nil)
 	return nil
+}
+
+// ship pushes the job branch and opens a PR, as the ship mode says.
+func (j *Job) ship(wt *workspace.Worktree) error {
+	mode := j.Ship
+	if mode == "" || mode == "commit" {
+		return nil
+	}
+	j.set("shipping")
+	if err := wt.Push(); err != nil {
+		return fmt.Errorf("push: %w", err)
+	}
+	j.emit("", "job.pushed", map[string]any{"branch": wt.Branch})
+	if mode != "pr" {
+		return nil
+	}
+	url, err := wt.OpenPR(fmt.Sprintf("%s: %s", j.ID, j.Title), j.prBody())
+	if err != nil {
+		return err
+	}
+	j.mu.Lock()
+	j.PR = url
+	j.mu.Unlock()
+	j.emit("", "job.pr_opened", map[string]any{"url": url, "branch": wt.Branch})
+	return nil
+}
+
+// prBody is the pull request description, built from the builder's handoff
+// and the reviewer's verdict.
+func (j *Job) prBody() string {
+	j.mu.Lock()
+	note, v := j.handoffs[j.lead], j.verdict
+	j.mu.Unlock()
+	var b strings.Builder
+	if j.Issue != "" {
+		fmt.Fprintf(&b, "Ticket: %s\n\n", j.Issue)
+	}
+	if note != nil {
+		fmt.Fprintf(&b, "## What changed\n\n%s\n", note.Did)
+		for _, d := range note.Decisions {
+			fmt.Fprintf(&b, "- %s\n", d)
+		}
+		b.WriteString("\n")
+	}
+	if len(j.Checks) > 0 {
+		b.WriteString("## Checks\n\n")
+		for _, c := range j.Checks {
+			fmt.Fprintf(&b, "- `%s` passed\n", c)
+		}
+		b.WriteString("\n")
+	}
+	if v != nil && v.Summary != "" {
+		fmt.Fprintf(&b, "## Review\n\n%s\n", v.Summary)
+	}
+	return strings.TrimSpace(b.String())
 }
 
 var errSameFailure = fmt.Errorf("the same check failed the same way twice")
