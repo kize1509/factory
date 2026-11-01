@@ -1,0 +1,27 @@
+/* Rendered Markdown (web/md.js). Uses the page's own palette variables, so Day and Dusk both work. */
+.md { overflow-wrap:anywhere; word-break:break-word; min-width:0; max-width:100%; white-space:normal; line-height:1.45 }
+.md > :first-child { margin-top:0 }
+.md > :last-child { margin-bottom:0 }
+.md p, .md ul, .md ol, .md blockquote, .md .code, .md .tablewrap, .md hr { margin:.4em 0 }
+.md ul, .md ol { padding-left:1.4em }
+.md li > p { margin:0 }
+.md li > ul, .md li > ol { margin:.15em 0 }
+.md h3, .md h4, .md h5 { font-family:Silkscreen, monospace; font-weight:400; color:var(--accent); margin:.7em 0 .3em; line-height:1.25; letter-spacing:.02em }
+.md h3 { font-size:13px }
+.md h4 { font-size:12px }
+.md h5 { font-size:11px }
+.md strong { font-weight:700 }
+.md a { color:var(--accent); text-decoration:underline; text-underline-offset:2px }
+.md code { font-family:'JetBrains Mono', ui-monospace, monospace; font-size:.9em; background:var(--bg); border:1px solid var(--line); border-radius:3px; padding:0 .3em }
+.md .code { position:relative }
+.md .code pre { margin:0; padding:1.9em .7em .6em; background:var(--bg); border:1px solid var(--line); border-radius:4px; overflow:auto; max-height:320px; white-space:pre; color:var(--fg); text-align:left }
+.md .code pre code { background:none; border:0; padding:0; font-size:12px; line-height:1.5; white-space:pre }
+.md .code .lang { position:absolute; left:8px; top:5px; font:9px Silkscreen, monospace; color:var(--soft); text-transform:uppercase }
+.md .code .copy { position:absolute; right:5px; top:4px; z-index:1; font:10px Silkscreen, monospace; color:var(--fg); background:var(--card); border:1px solid var(--line); border-radius:3px; padding:2px 6px; cursor:pointer }
+.md .code .copy:hover, .md .code .copy:focus-visible { border-color:var(--accent); color:var(--accent) }
+.md blockquote { border-left:3px solid var(--gold); padding:.1em 0 .1em .7em; color:var(--soft) }
+.md hr { border:0; border-top:1px solid var(--line) }
+.md .tablewrap { overflow-x:auto; max-width:100% }
+.md table { border-collapse:collapse; font-size:.95em }
+.md th, .md td { border:1px solid var(--line); padding:.25em .6em; text-align:left; vertical-align:top; overflow-wrap:normal }
+.md th { font-family:Silkscreen, monospace; font-weight:400; font-size:10px; background:var(--bg) }

@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Factory art preview</title>
 <link href="/fonts/fonts.css" rel="stylesheet">
+<link href="/md.css" rel="stylesheet">
+<script src="/md.js"></script>
 <link rel="icon" href="/assets/icon/owl.idle.png">
 <style>
   :root { --bg:#f4f7fb; --fg:#14213d; --soft:#52607a; --card:#ffffff; --line:#c9d4e3; --accent:#1d4e89; --accent-fg:#ffffff; --gold:#c49a2c;
@@ -38,7 +40,9 @@
   #alerts .al .why { color:var(--soft); overflow:hidden; text-overflow:ellipsis; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical }
   @keyframes alertin { from { transform:translateY(-8px); opacity:0 } }
   #m-guide .brief { max-height:40vh; overflow:auto; white-space:pre-wrap; font:12px/1.5 'JetBrains Mono', monospace; background:var(--bg); border:1px solid var(--line); border-radius:4px; padding:10px 12px; margin:0 }
-  #m-guide .why { color:var(--fail); font-size:13px }
+  #m-guide .why { color:var(--fail); font-size:13px; max-height:35vh; overflow:auto }
+  #m-guide .why .md { color:inherit }
+  #m-guide .why .md .code pre, #m-guide .why .md .code pre code { white-space:pre-wrap; overflow-wrap:anywhere }
   .modal.wide .box { width:min(1240px, 100%); height:min(90vh, 1000px); max-height:none }
   .modal .mh { display:flex; align-items:center; gap:10px; padding:12px 16px; border-bottom:2px solid var(--line) }
   .modal .mh b { font:13px Silkscreen, monospace; color:var(--accent) }
@@ -155,14 +159,16 @@
   #narr.min.new { animation:askpulse 1.4s ease-in-out 2 }
   #narr .who { font:10px Silkscreen, monospace; color:var(--accent); display:flex; justify-content:space-between; gap:8px }
   #narr .who span { color:var(--soft) }
-  #narr .txt { font-size:15px; line-height:1.4; min-height:1.4em }
+  #narr .txt { font-size:15px; line-height:1.4; min-height:1.4em; max-height:30vh; overflow-y:auto; overflow-wrap:anywhere }
   .chron .entry { padding:7px 10px; border-left:3px solid var(--line); margin:6px 6px 0; font-size:13.5px; line-height:1.45; overflow-wrap:anywhere }
   .chron .entry.now { border-left-color:var(--gold) }
   .chron .entry.ok { border-left-color:var(--ok) }
   .chron .entry.fail { border-left-color:var(--fail) }
   .chron .entry.ship { border-left-color:var(--accent); background:color-mix(in srgb, var(--accent) 7%, var(--card)) }
   .chron .entry small { display:block; color:var(--soft); font:10px Silkscreen, monospace; margin-bottom:2px }
-  .chron .entry .body.clamp { display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden }
+  .chron .entry .body.clamp { max-height:4.4em; overflow:hidden; -webkit-mask-image:linear-gradient(#000 55%, transparent); mask-image:linear-gradient(#000 55%, transparent) }
+  .chron .entry .body:not(.clamp) { max-height:50vh; overflow-y:auto }
+  .chron .entry { min-width:0 }
   .chron .entry .more { border:0; background:none; padding:2px 0 0; font:10px Silkscreen, monospace; color:var(--accent); cursor:pointer }
   .chron code, #thoughts code { font:12px "JetBrains Mono", monospace; background:var(--bg); padding:0 4px; border-radius:2px }
   .chron a { color:var(--accent) }
@@ -180,6 +186,11 @@
   .bubble.st-failed { --bc:var(--fail) }
   .bubble.st-done { --bc:var(--ok) }
   .bubble.st-waiting, .bubble.st-blocked { --bc:var(--warn) }
+  .bubble > span { min-width:0 }
+  .bubble.closed > span { white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+  .bubble.clickable { pointer-events:auto; cursor:pointer }
+  .bubble.open { max-width:min(28em, 80vw) }
+  .bubble .md { --fg:#14213d; --soft:#52607a; --bg:#f4f7fb; --card:#fff; --line:#c9d4e3; --accent:#1d4e89; --gold:#c49a2c; max-height:40vh; overflow:auto; font-weight:400; font-style:normal; text-align:left }
   .bubble.say { --bc:var(--accent); border-radius:16px; background:#fff }
   .bubble.st-dj { font-style:italic }
   .bubble.st-interrupted { background:var(--you) }
@@ -219,6 +230,7 @@
   #thoughts p.ack { border-left-color:var(--think) }
   #thoughts p.heard { border-left-color:var(--gold); color:var(--soft) }
   #thoughts p .t { color:var(--soft); font-size:11px; display:block }
+  #thoughts p .x.md { white-space:normal }
   .send { padding:10px 14px 14px; border-top:2px solid var(--line); display:flex; flex-direction:column; gap:6px }
   .send textarea { width:100%; min-height:58px; resize:vertical; font:13px Inter, sans-serif; background:var(--bg); color:var(--fg); border:2px solid var(--line); padding:6px 8px; border-radius:2px }
   .send small { color:var(--soft) }
@@ -463,19 +475,21 @@ function narrate(text, j = cur, log = true, kind = '') {
   document.getElementById('narr-where').textContent = j.city + ' · ' + new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
   const nb = document.getElementById('narr'); if (nb.classList.contains('min')) { nb.classList.remove('new'); void nb.offsetWidth; nb.classList.add('new'); }
   const el = document.getElementById('narr-txt'); clearTimeout(narrTimer);
-  let i = 0; const tick = () => { el.textContent = text.slice(0, i += 2); if (i < text.length) narrTimer = setTimeout(tick, 16); }; tick();
+  // type the plain text, then swap in the formatted version
+  const flat = Md.plain(text);
+  let i = 0; const tick = () => { el.textContent = flat.slice(0, i += 2); if (i < flat.length) narrTimer = setTimeout(tick, 16); else el.replaceChildren(Md.render(text)); }; tick();
 }
 // chronicle text is escaped; code(...) spans become code and https links become links.
 // The markers are control characters, so a command's own backticks stay as they are.
 const code = c => '\u0001' + c + '\u0002';
 const escHTML = s => String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
-const chronHTML = s => escHTML(s).replace(/\u0001([^\u0002]*)\u0002/g, '<code>$1</code>').replace(/https:\/\/[^\s<)]+[^\s<).,;]/g, u => `<a href="${u}" target="_blank" rel="noopener">${u}</a>`);
 function renderChron() {
   const box = document.getElementById('chron'), order = [cur, ...JOBS.filter(j => j !== cur)];
   const keep = box.querySelector('.list')?.scrollTop || 0;
   box.innerHTML = `<div class="sum"><b>Chronicle</b><span>What happened and why, newest first</span><button class="x">Hide</button></div><div class="list">${order.map((j, ji) =>
     `<div class="group">${j.city} · ${j.id}</div>` + ((j.chron || []).length ? j.chron.map((c, i) => { const long = c.text.length > 240;
-      return `<div class="entry${i === 0 ? ' now' : ''} ${c.kind || ''}"><small>${c.at.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' })}</small><div class="body${long && !c.open ? ' clamp' : ''}">${chronHTML(c.text)}</div>${long ? `<button class="more" data-j="${ji}" data-i="${i}">${c.open ? 'Less' : 'More'}</button>` : ''}</div>`; }).join('') : '<div class="entry">Nothing yet.</div>')).join('')}</div>`;
+      return `<div class="entry${i === 0 ? ' now' : ''} ${c.kind || ''}"><small>${c.at.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' })}</small><div class="body${long && !c.open ? ' clamp' : ''}" data-j="${ji}" data-i="${i}"></div>${long ? `<button class="more" data-j="${ji}" data-i="${i}">${c.open ? 'Less' : 'More'}</button>` : ''}</div>`; }).join('') : '<div class="entry">Nothing yet.</div>')).join('')}</div>`;
+  order.forEach((j, ji) => (j.chron || []).forEach((c, i) => { const b = box.querySelector(`.entry .body[data-j="${ji}"][data-i="${i}"]`); if (b) b.appendChild(Md.render(c.text)); }));
   box.querySelector('.list').scrollTop = keep;
   box.querySelector('.x').onclick = () => setChron(false);
   box.querySelectorAll('.more').forEach(b => b.onclick = () => { const c = order[b.dataset.j].chron[b.dataset.i]; c.open = !c.open; renderChron(); });
@@ -586,7 +600,7 @@ const toScreen = (x, y) => [(x - cam.x) * cam.z, (y - cam.y) * cam.z];
 new ResizeObserver(resize).observe(stage);
 
 let drag = null;
-stage.addEventListener('pointerdown', e => { if (e.target.closest('.zoom, .legend, .pop, #drawer, .hud, .citycard, #alerts, #narr')) return; drag = { x:e.clientX, y:e.clientY, cx:cam.x, cy:cam.y, moved:false }; stage.setPointerCapture(e.pointerId); });
+stage.addEventListener('pointerdown', e => { if (e.target.closest('.zoom, .legend, .pop, #drawer, .hud, .citycard, #alerts, #narr, .bubble')) return; drag = { x:e.clientX, y:e.clientY, cx:cam.x, cy:cam.y, moved:false }; stage.setPointerCapture(e.pointerId); });
 stage.addEventListener('pointermove', e => {
   if (!drag) return; const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
   if (Math.abs(dx) + Math.abs(dy) > 4) { drag.moved = true; stage.classList.add('drag'); }
@@ -968,15 +982,24 @@ function overlay(s, now) {
     const n = el('n:' + id, 'name'); if (n.textContent !== tag) n.textContent = tag;
     const [x, y] = toScreen(g.x, g.drawY ?? g.y);
     n.style.transform = `translate(${x - n.offsetWidth / 2}px, ${y + 20 * cam.z}px)`; n.style.opacity = cam.z < 0.72 ? 0 : g.alpha; seen.add('n:' + id);
-    const text = g.say || (g.inConvo ? '' : g.msg); if (!text || x < -30 || x > vw + 30 || y < 0 || y > vh + 40) continue;
+    const text = g.say || (g.inConvo ? '' : g.msg); if (!text) g.bubbleFor = null;
+    if (!text || x < -30 || x > vw + 30 || y < 0 || y > vh + 40) continue;
     const b = el('b:' + id, 'bubble');
+    // a bubble is open only for the message that was clicked; any other text closes it
+    const full = g.say ? (g.sayFull || g.say) : g.msg;
+    if (g.bubbleFor && g.bubbleFor !== full) g.bubbleFor = null;
+    const open = !!g.bubbleFor; b._full = full;
+    if (!b._bound) { b._bound = true; b.addEventListener('click', () => { g.bubbleFor = g.bubbleFor ? null : b._full; }); b.addEventListener('wheel', e => e.stopPropagation()); }
     const icon = g.say ? 'thinking' : { interrupted:'thinking', dj:'', dance:'' }[g.st] ?? g.st;
-    if (b.dataset.msg !== text + icon + dusk) {
-      b.dataset.msg = text + icon + dusk; b.innerHTML = '<img class="ic" alt=""><span></span><i class="tail"></i>';
+    const key = (open ? 'o' + full : text) + icon + dusk;
+    if (b.dataset.msg !== key) {   // an open bubble is only rebuilt when its content changes, so scroll and Copy stay put
+      b.dataset.msg = key; b.innerHTML = '<img class="ic" alt=""><span></span><i class="tail"></i>';
       const im = b.firstChild; if (icon && A.assets['icon/' + icon]) im.src = 'icon/' + icon + '.idle' + (dusk ? '.dusk' : '') + '.png'; else im.remove();
-      b.querySelector('span').textContent = text;
+      const sp = b.querySelector('span');
+      if (open) sp.appendChild(g.st === 'failed' && !g.say ? Md.code(full) : Md.render(full)); else sp.textContent = Md.oneLine(text, 90);
+      b.title = open ? 'Click to close' : 'Click to expand';
     }
-    b.className = 'bubble ' + (g.say ? 'say' : 'st-' + g.st) + (g.st === 'blocked' && !g.say ? ' ask' : '');
+    b.className = 'bubble clickable ' + (open ? 'open ' : 'closed ') + (g.say ? 'say' : 'st-' + g.st) + (g.st === 'blocked' && !g.say ? ' ask' : '');
     const bw = b.offsetWidth, bh = b.offsetHeight, base = y - 24 * cam.z - bh;
     let bx = Math.max(4, Math.min(vw - bw - 4, x - bw / 2)), by = base;
     for (let tries = 0; tries < 8; tries++) {
@@ -1073,12 +1096,13 @@ function buildDrawer(id) {
   if (!(thoughts[id] || []).length) list.innerHTML = '<p>Nothing yet.</p>';
   drawerFacts(); drawerProcs();
 }
+addEventListener('keydown', e => { if (e.key === 'Escape') for (const g of Object.values(agents)) g.bubbleFor = null; });
 function closeDrawer() { selected = null; drawer.classList.remove('open'); drawer.dataset.id = ''; }
 addEventListener('keydown', e => { if (e.key !== 'Escape' || document.activeElement.id === 'msg') return; if (pop.classList.contains('open')) hidePop(); else if (selected) closeDrawer(); else if (document.getElementById('legend').classList.contains('open')) setLegend(false); });
 function drawerFacts() {
   const g = agents[selected], f = document.getElementById('facts'); if (!f) return;
   const ST = { thinking:'Thinking', tool:'Working', waiting:'Waiting', blocked:'Needs you', done:'Done', failed:'Failed', interrupted:'Got your message', dj:'Playing a set', dance:'Dancing' };
-  f.innerHTML = `<span>Status</span><span>${g ? ST[g.st] || g.st : 'Resting'}</span><span>Now</span><span>${g && g.msg ? g.msg : '-'}</span>
+  f.innerHTML = `<span>Status</span><span>${g ? ST[g.st] || g.st : 'Resting'}</span><span>Now</span><span>${g && g.msg ? escHTML(Md.oneLine(g.msg, 200)) : '-'}</span>
     <span>Place</span><span>${g ? place[g.place].name : '-'}</span><span>Cost</span><code>${usd(cost[selected] || 0)}</code>`;
 }
 function renderThought(t, typed) {
@@ -1095,11 +1119,15 @@ function renderThought(t, typed) {
   // a time label only when a minute or more has passed since the last one
   const last = list.dataset.last ? +list.dataset.last : 0, showTime = t.kind === 'you' || t.at - last >= 60000;
   if (showTime && t.kind !== 'you') list.dataset.last = +t.at;
-  p.innerHTML = `<span class="t"></span><span class="x"></span>`; p.firstChild.textContent = t.kind === 'you' ? 'You' : showTime ? time : ''; list.appendChild(p);
+  p.innerHTML = `<span class="t"></span><div class="x${t.kind === 'you' ? '' : ' md'}"></div>`; p.firstChild.textContent = t.kind === 'you' ? 'You' : showTime ? time : ''; list.appendChild(p);
   if (!p.firstChild.textContent) p.firstChild.remove();
   const body = p.lastChild;
-  if (!typed || t.kind === 'you') { body.textContent = t.text; follow(); return; }
-  let i = 0; const tick = () => { body.textContent = t.text.slice(0, i += 3); follow(); if (i < t.text.length) setTimeout(tick, 14); }; tick();
+  if (t.kind === 'you') { body.textContent = t.text; follow(); return; }
+  const show = () => body.replaceChildren(...Md.render(t.text).childNodes);
+  if (!typed) { show(); follow(); return; }
+  // type the plain text, then swap in the formatted version
+  const flat = Md.plain(t.text);
+  let i = 0; const tick = () => { body.textContent = flat.slice(0, i += 3); follow(); if (i < flat.length) setTimeout(tick, 14); else { show(); follow(); } }; tick();
 }
 
 // ---------- controls ----------
@@ -1405,7 +1433,7 @@ function onEvent(j, e) {
   const other = e.agent && e.agent !== 'oracle' && e.agent !== REVIEWER && (e.agent !== (L.lead || BUILDER) || L.state === 'symposium' || L.state === 'grading');
   const mine = () => ((L.ag ||= {})[e.agent] ||= {});
   // a speech bubble for a few seconds, for the question-and-answer in review
-  const speak = (id, text) => { if (!here || old) return; const g = agents[id]; if (!g) return; g.say = text.length > 170 ? text.slice(0, 169) + '…' : text; g.talking = true;
+  const speak = (id, text) => { if (!here || old) return; const g = agents[id]; if (!g) return; g.say = text.length > 170 ? text.slice(0, 169) + '…' : text; g.sayFull = text; g.talking = true;
     setTimeout(() => { if (g.say && text.startsWith(g.say.slice(0, 20))) { g.say = null; g.talking = false; } }, 9000); };
   const say = (text, kind = '') => { if (!old) narrate(text, j, true, kind); else (j.chron ||= []).unshift({ text, kind, at:new Date(e.time) }); };
   const d = e.data || {};
@@ -1586,7 +1614,7 @@ function alarm(j, kind, why, quiet = false) {
   let el = alarmed.get(j.id);
   if (!el) { el = document.createElement('div'); alarmed.set(j.id, el); alerts.appendChild(el); }
   el.className = 'al ' + kind;
-  el.innerHTML = `<div><b>${escHTML(j.city)} · ${escHTML(j.id)} ${kind === 'stuck' ? 'is stuck' : 'has a question'}</b><span class="why">${escHTML(why || '')}</span></div>
+  el.innerHTML = `<div><b>${escHTML(j.city)} · ${escHTML(j.id)} ${kind === 'stuck' ? 'is stuck' : 'has a question'}</b><span class="why">${escHTML(Md.oneLine(why || '', 300))}</span></div>
     <button class="primary">${kind === 'stuck' ? 'Guide it on' : 'Answer'}</button><button data-show>Show</button>`;
   el.querySelector('.primary').onclick = () => openGuide(j);
   el.querySelector('[data-show]').onclick = () => enterCity(j);
@@ -1615,7 +1643,12 @@ async function openGuide(j) {
   document.getElementById('m-guide-t').textContent = ask ? 'Answer the question' : 'Guide it on';
   document.getElementById('m-guide-s').textContent = `${j.id} · ${j.title}`;
   const STEP = { starting:'the start', planning:'planning', symposium:'the Symposium', grading:'grading', building:'building', checking:'the checks', handoff:'the handoff', reviewing:'review', committing:'the commit', shipping:'shipping' };
-  document.getElementById('gd-why').textContent = ask ? (L.question || '') : `Stuck at ${STEP[L.stuck?.phase] || L.stuck?.phase || 'work'}: ${L.stuck?.error || ''}`;
+  const why = document.getElementById('gd-why');
+  if (ask) why.replaceChildren(Md.render(L.question || ''));
+  else { // the error is raw tool output, so it goes in a code block as it is
+    const h = document.createElement('b'); h.textContent = `Stuck at ${STEP[L.stuck?.phase] || L.stuck?.phase || 'work'}:`;
+    why.replaceChildren(h, ...(L.stuck?.error ? [Md.code(L.stuck.error)] : []));
+  }
   document.getElementById('gd-label').textContent = ask ? 'Your answer' : 'Your guidance';
   document.getElementById('gd-help').textContent = ask ? 'it goes into the handoff note and the job goes on.' : 'what to do next, what it got wrong, or where to look. The same agent carries on from where it stopped.';
   document.getElementById('gd-go').textContent = ask ? 'Send answer' : 'Carry on';
