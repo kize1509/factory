@@ -44,6 +44,10 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS events_job  ON events(job, seq);
 CREATE INDEX IF NOT EXISTS events_type ON events(type);
+CREATE TABLE IF NOT EXISTS projects (
+  repo  TEXT PRIMARY KEY,          -- the repository's path
+  name  TEXT NOT NULL              -- its readable name, given by the planner
+);
 CREATE TABLE IF NOT EXISTS prices (
   model       TEXT PRIMARY KEY,    -- provider/id, e.g. anthropic/claude-sonnet-5-5
   input       REAL NOT NULL,       -- US dollars per million tokens
@@ -101,8 +105,12 @@ func (s *Store) AddEvent(e events.Event) int64 {
 		s.db.Exec(`UPDATE jobs SET commit_sha=?, updated=? WHERE id=?`, str("sha"), t, e.Job)
 	case "job.pr_opened":
 		s.db.Exec(`UPDATE jobs SET pr_url=?, updated=? WHERE id=?`, str("url"), t, e.Job)
-	case "job.failed":
+	case "job.failed", "job.stuck":
 		s.db.Exec(`UPDATE jobs SET error=?, updated=? WHERE id=?`, str("error"), t, e.Job)
+	case "job.resumed":
+		s.db.Exec(`UPDATE jobs SET error='', updated=? WHERE id=?`, t, e.Job)
+	case "job.named":
+		s.db.Exec(`UPDATE jobs SET title=?, updated=? WHERE id=?`, str("title"), t, e.Job)
 	}
 	return seq
 }
@@ -204,6 +212,30 @@ func (s *Store) Jobs() ([]JobRow, error) {
 		out = append(out, j)
 	}
 	return out, rows.Err()
+}
+
+// Projects maps each repository to its readable name.
+func (s *Store) Projects() (map[string]string, error) {
+	rows, err := s.db.Query(`SELECT repo, name FROM projects`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var repo, name string
+		if err := rows.Scan(&repo, &name); err != nil {
+			return nil, err
+		}
+		out[repo] = name
+	}
+	return out, rows.Err()
+}
+
+// SetProject names a repository.
+func (s *Store) SetProject(repo, name string) error {
+	_, err := s.db.Exec(`INSERT INTO projects(repo, name) VALUES(?,?) ON CONFLICT(repo) DO UPDATE SET name=excluded.name`, repo, name)
+	return err
 }
 
 // Price is US dollars per million tokens for one model.

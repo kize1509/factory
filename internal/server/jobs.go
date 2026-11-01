@@ -13,7 +13,8 @@ import (
 // Chronicle and the metrics survive a restart.
 
 // LoadJobs brings back earlier jobs from the database. A job that was
-// still running when the engine stopped is marked interrupted. Jobs from
+// still running when the engine stopped is marked interrupted; it and a
+// stuck job can be guided on from what they wrote down. Jobs from
 // the old jobs.json are imported once, with their events.jsonl.
 func (s *Server) LoadJobs() {
 	s.importJobsFile()
@@ -34,9 +35,13 @@ func (s *Server) LoadJobs() {
 		j := job.New(spec, s.Bus, s.Runtimes[spec.Runtime])
 		s.Bus.Place(j.ID, j.Dir())
 		j.State, j.Branch, j.Commit, j.PR, j.Error, j.Started = row.State, row.Branch, row.Commit, row.PR, row.Error, row.Started
-		if j.State != "done" && j.State != "failed" {
+		if row.Title != "" {
+			j.Title = row.Title // the planner's name for it
+		}
+		if j.State != "done" && j.State != "failed" && j.State != "stuck" {
 			j.State = "interrupted"
 		}
+		j.SetRuntimes(s.Runtimes)
 		s.jobs[j.ID] = j
 	}
 }

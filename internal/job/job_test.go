@@ -299,3 +299,124 @@ func TestShipPushSendsBranchToOrigin(t *testing.T) {
 		t.Fatalf("origin has %s, job committed %s", got, j.Commit)
 	}
 }
+
+// stuckRT plays a builder who can't get the check to pass on its own; it
+// gets there once you tell it how.
+type stuckRT struct {
+	job    *Job
+	starts int
+}
+
+func (f *stuckRT) Start(_ context.Context, s runtime.AgentSpec) (runtime.Agent, error) {
+	if s.Agent == builder {
+		f.starts++
+	}
+	return &stuckAgent{rt: f, cwd: s.Cwd, id: s.Agent}, nil
+}
+
+type stuckAgent struct {
+	rt  *stuckRT
+	cwd string
+	id  string
+}
+
+func (a *stuckAgent) Prompt(_ context.Context, text string) (string, error) {
+	switch {
+	case a.id != builder: // the planner only plans
+	case strings.Contains(text, "write exactly done"):
+		os.WriteFile(filepath.Join(a.cwd, "app.txt"), []byte("done\n"), 0o644)
+		a.rt.job.SaveHandoff(builder, &handoff.Note{From: builder, To: "reviewers", Did: "wrote done", Next: "review", Files: []string{"app.txt"}})
+	default:
+		os.WriteFile(filepath.Join(a.cwd, "app.txt"), []byte("nearly\n"), 0o644)
+	}
+	return "ok", nil
+}
+func (a *stuckAgent) Steer(string) error { return nil }
+func (a *stuckAgent) Stop() error        { return nil }
+
+func TestStuckJobCarriesOnWithGuidance(t *testing.T) {
+	repo := t.TempDir()
+	for _, args := range [][]string{{"init", "-q", "-b", "main"}, {"config", "user.email", "t@t"}, {"config", "user.name", "t"}, {"commit", "-q", "--allow-empty", "-m", "init"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repo
+		cmd.Run()
+	}
+	bus := events.NewBus(t.TempDir())
+	rt := &stuckRT{}
+	j := New(Spec{ID: "S1", Title: "make app", Repo: repo, Prompt: "write done into app.txt", Checks: []string{"grep -q '^done$' app.txt"}, MaxLoops: 2}, bus, rt)
+	rt.job = j
+	bus.Place(j.ID, j.Dir())
+	done := make(chan struct{})
+	go func() { j.Run(context.Background()); close(done) }()
+	waitState := func(want string) {
+		for i := 0; i < 300 && !strings.EqualFold(j.stateNow(), want); i++ {
+			time.Sleep(20 * time.Millisecond)
+		}
+		if got := j.stateNow(); got != want {
+			t.Fatalf("state %s, want %s (error %q)", got, want, j.Error)
+		}
+	}
+	waitState("stuck")
+	brief := j.Brief()
+	for _, want := range []string{"Where S1 stopped", "checks keep failing", "app.txt", "grep -q"} {
+		if !strings.Contains(brief, want) {
+			t.Errorf("the brief should mention %q:\n%s", want, brief)
+		}
+	}
+	if start, err := j.Continue("The check wants the line done: write exactly done into app.txt."); err != nil || start {
+		t.Fatalf("a live stuck job should take guidance at once: start %v err %v", start, err)
+	}
+	<-done
+	if j.State != "done" || j.Commit == "" {
+		t.Fatalf("state %s commit %q error %q", j.State, j.Commit, j.Error)
+	}
+	if rt.starts != 1 {
+		t.Errorf("the same builder should carry on; builders started: %d", rt.starts)
+	}
+}
+
+func (j *Job) stateNow() string {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.State
+}
+
+func TestStuckJobCarriesOnAfterRestart(t *testing.T) {
+	repo := t.TempDir()
+	for _, args := range [][]string{{"init", "-q", "-b", "main"}, {"config", "user.email", "t@t"}, {"config", "user.name", "t"}, {"commit", "-q", "--allow-empty", "-m", "init"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repo
+		cmd.Run()
+	}
+	spec := Spec{ID: "S2", Title: "make app", Repo: repo, Prompt: "write done into app.txt", Checks: []string{"grep -q '^done$' app.txt"}, MaxLoops: 2}
+	bus := events.NewBus(t.TempDir())
+	rt := &stuckRT{}
+	j := New(spec, bus, rt)
+	rt.job = j
+	bus.Place(j.ID, j.Dir())
+	ctx, stop := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { j.Run(ctx); close(done) }()
+	for i := 0; i < 300 && j.stateNow() != "stuck"; i++ {
+		time.Sleep(20 * time.Millisecond)
+	}
+	stop() // the engine goes away while the job is stuck
+	<-done
+
+	// a new engine loads the job and you guide it on
+	rt2 := &stuckRT{}
+	j2 := New(spec, bus, rt2)
+	j2.State = "stuck"
+	rt2.job = j2
+	start, err := j2.Continue("write exactly done into app.txt")
+	if err != nil || !start {
+		t.Fatalf("a stuck job from before a restart should start again: start %v err %v", start, err)
+	}
+	j2.Run(context.Background())
+	if j2.State != "done" || j2.Commit == "" {
+		t.Fatalf("state %s commit %q error %q", j2.State, j2.Commit, j2.Error)
+	}
+	if rt2.starts != 1 {
+		t.Errorf("one new builder should pick it up; started %d", rt2.starts)
+	}
+}

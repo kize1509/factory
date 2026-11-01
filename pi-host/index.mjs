@@ -90,6 +90,13 @@ function factoryTools(req) {
       execute: (_id, params) => call("grade", params),
     }),
     defineTool({
+      name: "name_job",
+      label: "Name the job",
+      description: "Planners only, first thing: give the job a short readable title (at most 60 characters, plain words) and, if asked, the project a name. Shown on the map.",
+      parameters: Type.Object({ title: Type.String(), project: Type.Optional(Type.String()) }),
+      execute: (_id, params) => call("name_job", params),
+    }),
+    defineTool({
       name: "set_status",
       label: "Set status",
       description: "Say in a few words what you are doing now. Shown above your head on the map.",
@@ -144,7 +151,8 @@ async function start(req) {
     thinkingLevel: req.thinking || "medium",
     tools: [...(req.tools || ["read", "bash", "edit", "write", "grep", "find", "ls"]), "handoff", "set_checks", "set_status",
       ...(req.role === "reviewer" ? ["ask_builder", "verdict", "grade"] : []),
-      ...(req.role === "builder" || req.role === "planner" ? ["propose_experiments"] : [])],
+      ...(req.role === "builder" || req.role === "planner" ? ["propose_experiments"] : []),
+      ...(req.role === "planner" ? ["name_job"] : [])],
     customTools: factoryTools(req),
     resourceLoader: loader,
     sessionManager: SessionManager.inMemory(req.cwd),

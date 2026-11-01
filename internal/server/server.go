@@ -47,6 +47,9 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/jobs", s.startJob)
 	mux.HandleFunc("GET /api/jobs", s.listJobs)
+	mux.HandleFunc("POST /api/jobs/{job}/continue", s.continueJob)
+	mux.HandleFunc("GET /api/jobs/{job}/context", s.jobContext)
+	mux.HandleFunc("GET /api/projects", s.projects)
 	mux.HandleFunc("GET /api/events", s.events)
 	mux.HandleFunc("POST /api/agents/{job}/{agent}/message", s.message)
 	mux.HandleFunc("POST /api/agents/{job}/{agent}/stop", s.stopAgent)
@@ -175,6 +178,9 @@ func (s *Server) startJob(w http.ResponseWriter, r *http.Request) {
 			spec.ID = fmt.Sprintf("%s-run%d", base, n)
 		}
 	}
+	if names, _ := s.Store.Projects(); names[spec.Repo] != "" {
+		spec.Project = names[spec.Repo] // named on an earlier job; the planner names it otherwise
+	}
 	j := job.New(spec, s.Bus, rt)
 	j.SetRuntimes(s.Runtimes)
 	s.jobs[spec.ID] = j
@@ -183,6 +189,52 @@ func (s *Server) startJob(w http.ResponseWriter, r *http.Request) {
 	s.Store.SaveJob(j.ID, spec.Issue, spec.Title, spec.Repo, spec, j.Started)
 	go j.Run(context.Background())
 	writeJSON(w, map[string]any{"id": j.ID})
+}
+
+// continueJob gives a stuck job your guidance. A job still alive in the
+// engine takes it at once; one stuck before a restart starts again from what
+// it wrote down.
+func (s *Server) continueJob(w http.ResponseWriter, r *http.Request) {
+	j := s.job(w, r.PathValue("job"))
+	if j == nil {
+		return
+	}
+	var body struct {
+		Text string `json:"text"`
+	}
+	json.NewDecoder(r.Body).Decode(&body)
+	s.guide(w, j, body.Text)
+}
+
+func (s *Server) guide(w http.ResponseWriter, j *job.Job, text string) {
+	start, err := j.Continue(text)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	s.Bus.Emit(j.ID, "", "human.guidance", map[string]any{"text": text})
+	if start {
+		go j.Run(context.Background())
+	}
+	writeJSON(w, map[string]any{"ok": true, "continued": true})
+}
+
+// jobContext is what a stuck job wrote down about where it stopped.
+func (s *Server) jobContext(w http.ResponseWriter, r *http.Request) {
+	j := s.job(w, r.PathValue("job"))
+	if j == nil {
+		return
+	}
+	writeJSON(w, map[string]any{"id": j.ID, "state": j.State, "phase": j.Phase, "error": j.Error, "brief": j.Brief()})
+}
+
+func (s *Server) projects(w http.ResponseWriter, _ *http.Request) {
+	names, err := s.Store.Projects()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, names)
 }
 
 func (s *Server) listJobs(w http.ResponseWriter, _ *http.Request) {
@@ -271,6 +323,10 @@ func (s *Server) message(w http.ResponseWriter, r *http.Request) {
 		Text string `json:"text"`
 	}
 	json.NewDecoder(r.Body).Decode(&body)
+	if j.Resumable() { // a message to a stuck job is guidance to carry it on
+		s.guide(w, j, body.Text)
+		return
+	}
 	a := j.Agent(r.PathValue("agent"))
 	if a == nil || strings.TrimSpace(body.Text) == "" {
 		http.Error(w, "no such agent, or empty message", http.StatusBadRequest)
@@ -388,6 +444,23 @@ func (s *Server) callTool(j *job.Job, agent, tool string, args []byte) (string, 
 			return "", err
 		}
 		return "Verdict recorded.", nil
+	case "name_job":
+		var body struct {
+			Title   string `json:"title"`
+			Project string `json:"project"`
+		}
+		if err := json.Unmarshal(args, &body); err != nil {
+			return "", err
+		}
+		named := j.Project != ""
+		if err := j.Name(agent, body.Title, body.Project); err != nil {
+			return "", err
+		}
+		if !named && j.Project != "" {
+			s.Store.SetProject(j.Repo, j.Project)
+		}
+		s.Store.SaveJob(j.ID, j.Issue, j.Title, j.Repo, j.Spec, j.Started)
+		return fmt.Sprintf("Named: %s (project %s).", j.Title, j.Project), nil
 	case "set_status":
 		var body struct {
 			Step string `json:"step"`
