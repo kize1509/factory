@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Factory admin</title>
+<link href="/fonts/fonts.css" rel="stylesheet">
+<link rel="icon" href="/assets/icon/owl.idle.png">
+<style>
+  :root { --bg:#f4f7fb; --fg:#14213d; --soft:#52607a; --card:#ffffff; --line:#c9d4e3; --accent:#1d4e89; --accent-fg:#fff; --gold:#c49a2c;
+          --ok:#3f8a3a; --warn:#b98510; --fail:#b8352c; --bar:#1d4e89; --grid:#e3e9f1 }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#0b1628; --fg:#e8eef6; --soft:#9fb0cc; --card:#12223a; --line:#2a3d5c; --accent:#e0b84a; --accent-fg:#0b1628; --gold:#e0b84a; --ok:#6cbf66; --warn:#e0b84a; --fail:#ff7a6e; --bar:#8fbfe8; --grid:#1d2f4a } }
+  :root[data-theme="dark"] { --bg:#0b1628; --fg:#e8eef6; --soft:#9fb0cc; --card:#12223a; --line:#2a3d5c; --accent:#e0b84a; --accent-fg:#0b1628; --gold:#e0b84a; --ok:#6cbf66; --warn:#e0b84a; --fail:#ff7a6e; --bar:#8fbfe8; --grid:#1d2f4a }
+  * { box-sizing:border-box }
+  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.5 Inter, system-ui, sans-serif }
+  header { position:sticky; top:0; z-index:5; display:flex; gap:8px; align-items:center; flex-wrap:wrap; padding:10px 16px; background:color-mix(in srgb, var(--bg) 88%, transparent);
+           backdrop-filter:blur(8px); border-bottom:6px solid transparent; border-image:repeating-linear-gradient(90deg, var(--accent) 0 6px, transparent 6px 8px, var(--accent) 8px 10px, transparent 10px 12px) 0 0 6 0 }
+  header h1 { font:15px Silkscreen, monospace; margin:0 12px 0 0 }
+  button, .btn { font:12px Silkscreen, monospace; background:var(--card); color:var(--fg); border:2px solid var(--accent); padding:6px 10px; cursor:pointer; border-radius:2px; text-decoration:none }
+  button.on, button.primary { background:var(--accent); color:var(--accent-fg) }
+  main { max-width:1180px; margin:0 auto; padding:16px }
+  .card { background:var(--card); border:2px solid var(--line); border-radius:6px; padding:14px 16px; margin-bottom:14px }
+  .card h2 { font:13px Silkscreen, monospace; margin:0 0 10px; color:var(--accent) }
+  .card p.help { margin:-4px 0 12px; color:var(--soft); font-size:13px }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:14px }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; padding:6px 0; border-top:1px solid var(--grid) }
+  .row:first-of-type { border-top:0 }
+  .row .k { width:170px; color:var(--soft) }
+  code, .mono { font:12.5px "JetBrains Mono", monospace }
+  .pill { font:10px Silkscreen, monospace; padding:2px 7px; border-radius:3px; display:inline-flex; gap:5px; align-items:center }
+  .pill.ok { background:color-mix(in srgb, var(--ok) 20%, var(--card)); color:var(--fg) }
+  .pill.ok::before { content:'✓' }
+  .pill.bad { background:color-mix(in srgb, var(--fail) 20%, var(--card)); color:var(--fg) }
+  .pill.bad::before { content:'✕' }
+  .pill.warn { background:color-mix(in srgb, var(--warn) 25%, var(--card)); color:var(--fg) }
+  .pill.warn::before { content:'!' }
+  input, select { font:13px Inter, sans-serif; color:var(--fg); background:var(--bg); border:2px solid var(--line); border-radius:3px; padding:6px 8px }
+  input[type="text"], input[type="password"], input[type="url"] { min-width:320px }
+  table { width:100%; border-collapse:collapse; font-size:13px }
+  th { text-align:left; font:10px Silkscreen, monospace; color:var(--soft); padding:6px 8px; border-bottom:2px solid var(--line) }
+  td { padding:7px 8px; border-bottom:1px solid var(--grid); vertical-align:middle }
+  td.n, th.n { text-align:right; font-variant-numeric:tabular-nums }
+  .tiles { display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:12px; margin-bottom:14px }
+  .tile { background:var(--card); border:2px solid var(--line); border-radius:6px; padding:12px 14px }
+  .tile .v { font:600 26px/1.1 Inter, sans-serif; font-variant-numeric:tabular-nums }
+  .tile .l { font:10px Silkscreen, monospace; color:var(--soft); margin-top:4px }
+  .bars { display:grid; gap:8px }
+  .bar { display:grid; grid-template-columns:minmax(70px, 38%) minmax(60px, 1fr) auto; gap:10px; align-items:center; font-size:13px }
+  .bar .name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+  .bar .track { position:relative; display:block; height:16px; background:var(--grid); border-radius:0 4px 4px 0 }
+  .bar .fill { position:absolute; left:0; top:2px; height:12px; background:var(--bar); border-radius:0 4px 4px 0; min-width:2px }
+  .bar .val { text-align:right; font-variant-numeric:tabular-nums; color:var(--soft) }
+  .bar:hover .fill { filter:brightness(1.15) }
+  #tip { position:fixed; pointer-events:none; background:var(--card); border:2px solid var(--line); border-radius:4px; padding:6px 9px; font-size:12px; box-shadow:0 6px 16px rgba(20,33,61,.18); display:none; z-index:20 }
+  .msg { font-size:13px; margin-left:8px }
+  .msg.err { color:var(--fail) } .msg.ok { color:var(--ok) }
+  .empty { color:var(--soft); font-style:italic }
+  .offline { background:color-mix(in srgb, var(--warn) 20%, var(--card)); border-color:var(--warn) }
+  svg text { fill:var(--fg); font:11px Inter, sans-serif }
+  .embed header h1, .embed header .btn { display:none }
+  .embed header { top:0 }
+  .st { font:10px Silkscreen, monospace; padding:3px 8px; border-radius:3px; white-space:nowrap; display:inline-flex; gap:6px; align-items:center }
+  .st::before { content:''; width:8px; height:8px; border-radius:50% }
+  .st.running { background:color-mix(in srgb, var(--accent) 16%, var(--card)) } .st.running::before { background:var(--accent); animation:blink 1s infinite }
+  .st.waiting { background:color-mix(in srgb, var(--warn) 28%, var(--card)) } .st.waiting::before { background:var(--warn); animation:blink .7s infinite }
+  .st.done { background:color-mix(in srgb, var(--ok) 20%, var(--card)) } .st.done::before { background:var(--ok) }
+  .st.failed { background:color-mix(in srgb, var(--fail) 18%, var(--card)) } .st.failed::before { background:var(--fail) }
+  .st.interrupted { background:var(--grid) } .st.interrupted::before { background:var(--soft) }
+  @keyframes blink { 50% { opacity:.25 } }
+  .job { border:2px solid var(--line); border-radius:6px; padding:12px 14px; margin-bottom:10px; background:var(--card) }
+  .job.waiting { border-color:var(--warn) }
+  .job .top { display:flex; gap:10px; align-items:center; flex-wrap:wrap }
+  .job .top b { font:600 15px Inter, sans-serif }
+  .job .top .id { font:13px "JetBrains Mono", monospace; color:var(--soft) }
+  .job .facts { display:flex; gap:6px 18px; flex-wrap:wrap; margin-top:8px; font-size:13px; color:var(--soft) }
+  .job .facts span b { color:var(--fg); font-weight:500 }
+  .job .q { margin-top:10px; padding:8px 10px; border-radius:4px; background:color-mix(in srgb, var(--warn) 18%, var(--card)) }
+  .job .e { margin-top:10px; padding:8px 10px; border-radius:4px; background:color-mix(in srgb, var(--fail) 12%, var(--card)); font:12.5px "JetBrains Mono", monospace; white-space:pre-wrap }
+  .job .acts { display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; align-items:center }
+  .counts { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px }
+  textarea.prompt { width:100%; min-height:220px; font:13px/1.5 "JetBrains Mono", monospace; color:var(--fg); background:var(--bg); border:2px solid var(--line); border-radius:4px; padding:10px }
+  .skilltab td.c { text-align:center }
+  .skilltab th.c { text-align:center; writing-mode:vertical-rl; transform:rotate(180deg); padding:8px 4px; height:92px }
+  .skilltab .d { color:var(--soft); font-size:12px; max-width:440px }
+  .skilltab .note { color:var(--warn); font-size:12px }
+  .tag { font:9px Silkscreen, monospace; padding:2px 5px; border-radius:2px; background:var(--grid); color:var(--soft); margin-left:4px }
+  @media (max-width: 640px) { .row .k { width:100% } input[type="text"], input[type="password"], input[type="url"] { min-width:0; width:100% } .bar { grid-template-columns:90px 1fr 64px } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Factory admin</h1>
+  <nav id="tabs"></nav>
+  <span style="flex:1"></span>
+  <a class="btn" href="/app">Back to the map</a>
+</header>
+<main id="main"></main>
+<div id="tip"></div>
+<script>
+const TABS = [['jobs', 'Jobs'], ['connections', 'Connections'], ['runtimes', 'Runtimes'], ['models', 'Models'], ['roles', 'Roles'], ['prompts', 'Prompts'], ['skills', 'Skills'], ['prices', 'Prices'], ['metrics', 'Metrics'], ['limits', 'Limits']];
+let tab = (location.hash || '#jobs').slice(1);
+const EMBED = new URLSearchParams(location.search).has('embed');   // shown inside the map's Admin window
+if (EMBED) document.documentElement.classList.add('embed');
+const $ = s => document.querySelector(s), main = $('#main');
+const usd = v => '$' + (v || 0).toFixed(v < 1 ? 4 : 2);
+const fmt = n => (n || 0).toLocaleString();
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
+async function api(path, opts) { const r = await fetch(path, { cache:'no-store', ...opts }); const t = await r.text(); let j; try { j = JSON.parse(t); } catch { j = t; } if (!r.ok) throw Object.assign(new Error(typeof j === 'string' ? j : JSON.stringify(j)), { body:j }); return j; }
+
+function nav() {
+  $('#tabs').innerHTML = TABS.map(([id, name]) => `<button data-t="${id}" class="${id === tab ? 'on' : ''}">${name}</button>`).join(' ');
+  $('#tabs').querySelectorAll('button').forEach(b => b.onclick = () => { tab = b.dataset.t; location.hash = tab; show(); });
+}
+async function show() {
+  nav();
+  main.innerHTML = '<div class="card"><span class="empty">Loading…</span></div>';
+  clearInterval(refresher);
+  try { await ({ jobs, connections, runtimes, models, roles, prompts, skills, prices, metrics, limits })[tab](); }
+  catch (e) { main.innerHTML = `<div class="card offline"><h2>The engine isn't answering</h2><p>Start it with <code>go run ./cmd/factory serve</code> and open <code>http://127.0.0.1:7777/admin.html</code>.</p><p class="mono">${esc(e.message)}</p></div>`; }
+}
+
+// ---------- Connections ----------
+async function connections() {
+  const [st, set] = await Promise.all([api('/api/admin/status'), api('/api/admin/settings')]);
+  main.innerHTML = `
+  <div class="card"><h2>Model gateway</h2><p class="help">All model traffic goes through the JetBrains Central wire, metered by the engine (docs/WIRE.md).</p>
+    <div class="row"><span class="k">Wire</span><code>${esc(st.wire.url)}</code> <span class="pill ${st.wire.ok ? 'ok' : 'bad'}">${st.wire.ok ? 'reachable' : 'not reachable'}</span></div>
+    <div class="row"><span class="k">Central CLI</span>${esc(st.wire.central || 'not found')}</div>
+    <div class="row"><span class="k">Credits this month</span>${esc(st.credits || 'unknown')}</div>
+    ${st.wire.ok ? '' : '<div class="row"><span class="k"></span><span>Try <code>central repair</code> in a terminal.</span></div>'}
+  </div>
+  <div class="card"><h2>YouTrack</h2><p class="help">Set once. After that you only type ticket IDs.</p>
+    <form id="yt">
+      <div class="row"><span class="k">URL</span><input type="url" name="url" placeholder="https://yourcompany.youtrack.cloud" value="${esc(set.youtrack.url)}"></div>
+      <div class="row"><span class="k">Token</span><input type="password" name="token" placeholder="perm:…" value="${esc(set.youtrack.token)}"> ${st.youtrack.token_set ? '<span class="pill ok">stored</span>' : '<span class="pill warn">not set</span>'}</div>
+      <div class="row"><span class="k"></span><button class="primary">Save</button><span class="msg" id="ytmsg"></span></div>
+    </form>
+  </div>`;
+  $('#yt').onsubmit = async e => {
+    e.preventDefault(); const f = new FormData(e.target);
+    try { await api('/api/admin/settings', { method:'PUT', headers:{ 'content-type':'application/json' }, body:JSON.stringify({ roles:set.roles, youtrack:{ url:f.get('url'), token:f.get('token') }, limits:set.limits }) });
+          $('#ytmsg').className = 'msg ok'; $('#ytmsg').textContent = 'Saved.'; }
+    catch (err) { $('#ytmsg').className = 'msg err'; $('#ytmsg').textContent = err.message; }
+  };
+}
+
+// ---------- Runtimes ----------
+async function runtimes() {
+  const st = await api('/api/admin/status');
+  main.innerHTML = `<div class="card"><h2>Runtimes</h2><p class="help">Pi is the primary runtime. Claude Code runs only Claude models, Codex only GPT models, Pi runs both (D31).</p>
+    <table><tr><th>Runtime</th><th>Runs</th><th>Version</th><th>Status</th></tr>
+    ${st.runtimes.map(r => `<tr><td><b>${r.name}</b>${r.primary ? ' <span class="pill ok">primary</span>' : ''}</td><td>${r.runs}</td><td class="mono">${esc(r.version || '-')}</td>
+      <td>${r.installed ? '<span class="pill ok">installed</span>' : '<span class="pill bad">missing</span>'}</td></tr>`).join('')}
+    </table><div class="row" style="margin-top:8px"><span class="k">Node</span><span class="mono">${esc(st.node)}</span></div></div>`;
+}
+
+// ---------- Models ----------
+// ---------- Jobs: is it running, waiting on you, done or failed ----------
+let refresher = null;
+const RUNNING = ['starting', 'planning', 'symposium', 'grading', 'building', 'checking', 'handoff', 'reviewing', 'committing'];
+const stateOf = j => RUNNING.includes(j.state) ? 'running' : j.state;
+const PHASE = { planning:'planning at the Academy', symposium:'trying several approaches at the Symposium', grading:'grading the experiments', starting:'starting', building:'building at the Workshop', checking:'running checks at the Oracle', handoff:'writing the handoff', reviewing:'in review at the Areopagus', committing:'committing' };
+const ago = t => { const s = Math.max(0, (Date.now() - Date.parse(t)) / 1000); return s < 90 ? Math.round(s) + ' s ago' : s < 5400 ? Math.round(s / 60) + ' min ago' : s < 129600 ? Math.round(s / 3600) + ' h ago' : Math.round(s / 86400) + ' days ago'; };
+async function jobs() {
+  const draw = async () => {
+    const [list, m] = await Promise.all([api('/api/jobs'), api('/api/admin/metrics')]);
+    const stats = Object.fromEntries((m.jobs || []).map(x => [x.id, x]));
+    list.sort((a, b) => Date.parse(b.started) - Date.parse(a.started));
+    const n = s => list.filter(j => stateOf(j) === s).length;
+    const html = `<div class="counts"><span class="st running">${n('running')} running</span><span class="st waiting">${n('waiting')} waiting on you</span>
+        <span class="st done">${n('done')} done</span><span class="st failed">${n('failed')} failed</span>${n('interrupted') ? `<span class="st interrupted">${n('interrupted')} interrupted</span>` : ''}</div>
+      ${list.length ? list.map(j => { const s = stats[j.id] || {}, st = stateOf(j);
+        return `<div class="job ${st}" data-id="${esc(j.id)}">
+          <div class="top"><span class="st ${st}">${st === 'running' ? esc(PHASE[j.state] || j.state) : st === 'waiting' ? 'waiting on you' : st}</span>
+            <b>${esc(j.title || j.id)}</b><span class="id">${esc(j.issue || j.id)}</span></div>
+          <div class="facts"><span>started <b>${ago(j.started)}</b></span><span>time <b>${Math.round(s.seconds || 0)} s</b></span><span>cost <b>${usd(s.usd || 0)}</b></span>
+            <span>runtime <b>${esc(j.runtime || 'pi')} · ${esc((j.model || '').split('/').pop())}</b></span><span>heal loops <b>${s.loops || 0}</b></span>
+            <span>repo <b class="mono">${esc(j.repo)}</b></span>${j.branch ? `<span>branch <b class="mono">${esc(j.branch)}</b></span>` : ''}${j.commit ? `<span>commit <b class="mono">${esc(j.commit)}</b></span>` : ''}</div>
+          ${st === 'waiting' ? `<div class="q"><b>Question:</b> ${esc(j.question)}</div><form class="acts answer"><input type="text" name="a" placeholder="Your answer" required style="flex:1;min-width:220px"><button class="primary">Send answer</button></form>` : ''}
+          ${st === 'failed' && j.error ? `<div class="e">${esc(j.error)}</div>` : ''}
+          <div class="acts">${EMBED ? '<button data-map>Show on the map</button>' : ''}${st === 'running' || st === 'waiting' ? '<button data-stop>Stop job</button>' : ''}<span class="msg"></span></div>
+        </div>`; }).join('') : '<div class="card"><p class="empty">No jobs yet. Start one with New task on the map.</p></div>'}`;
+    const focus = document.activeElement?.name === 'a' ? document.activeElement.closest('.job')?.dataset.id : null;
+    if (focus) return; // don't redraw while you type an answer
+    main.innerHTML = html;
+    main.querySelectorAll('.job').forEach(el => {
+      const id = el.dataset.id, msg = el.querySelector('.msg');
+      el.querySelector('[data-map]')?.addEventListener('click', () => parent.postMessage({ openJob:id }, location.origin));
+      el.querySelector('[data-stop]')?.addEventListener('click', async () => { if (!confirm(`Stop ${id}?`)) return; await api(`/api/agents/${encodeURIComponent(id)}/archimedes/stop`, { method:'POST' }); msg.textContent = 'Stopping…'; });
+      el.querySelector('form.answer')?.addEventListener('submit', async e => { e.preventDefault();
+        try { await api(`/api/agents/${encodeURIComponent(id)}/archimedes/message`, { method:'POST', headers:{ 'content-type':'application/json' }, body:JSON.stringify({ text:e.target.a.value }) }); e.target.a.value = ''; msg.className = 'msg ok'; msg.textContent = 'Sent.'; draw(); }
+        catch (err) { msg.className = 'msg err'; msg.textContent = err.message; } });
+    });
+  };
+  await draw();
+  refresher = setInterval(() => draw().catch(() => {}), 3000);
+}
+
+let modelCache = null;
+async function getModels() { return modelCache ||= await api('/api/admin/models'); }
+async function models() {
+  const m = await getModels();
+  const tier = id => /opus|sol|fable|astra/.test(id) ? 'think' : /sonnet|terra/.test(id) ? 'code' : /haiku|luna|mini|nano/.test(id) ? 'execute' : '';
+  const list = (p, name) => `<div class="card"><h2>${name}</h2><p class="help">Read live from the wire. ${m[p]?.length || 0} models.</p><table><tr><th>Model</th><th>Tier</th></tr>
+    ${(m[p] || []).map(id => `<tr><td class="mono">${esc(id)}</td><td>${tier(id) ? `<span class="pill ok">${tier(id)}</span>` : ''}</td></tr>`).join('')}</table></div>`;
+  main.innerHTML = `<div class="grid">${list('anthropic', 'Claude (Anthropic)')}${list('openai', 'GPT (OpenAI)')}</div>`;
+}
+
+// ---------- Roles ----------
+async function roles() {
+  const [set, m] = await Promise.all([api('/api/admin/settings'), getModels()]);
+  const all = [...(m.anthropic || []), ...(m.openai || [])];
+  const fits = (rt, id) => rt === 'pi' || (rt === 'claude-code' && id.startsWith('anthropic/')) || (rt === 'codex' && id.startsWith('openai/'));
+  const opts = (rt, cur) => { const ok = all.filter(id => fits(rt, id)); if (cur && !ok.includes(cur)) ok.unshift(cur); return ok.map(id => `<option ${id === cur ? 'selected' : ''}>${esc(id)}</option>`).join(''); };
+  main.innerHTML = `<div class="card"><h2>Roles</h2><p class="help">Which runtime and model play each role. Only pairs that can work are offered. Builders use this today, on any of the three runtimes; the other roles start in M1.</p>
+    <form id="rf"><table><tr><th>Role</th><th>Runtime</th><th>Model</th></tr>
+    ${set.role_names.map(r => `<tr><td><b>${r}</b></td><td><select name="${r}.runtime">${['pi', 'claude-code', 'codex'].map(x => `<option ${x === set.roles[r].runtime ? 'selected' : ''}>${x}</option>`).join('')}</select></td>
+      <td><select name="${r}.model">${opts(set.roles[r].runtime, set.roles[r].model)}</select></td></tr>`).join('')}</table>
+    <div class="row"><button class="primary">Save roles</button><span class="msg" id="rmsg"></span></div></form></div>`;
+  // switching runtime keeps the role's tier: think, code or execute (D29)
+  const TIERS = { think:['anthropic/claude-opus-5-5', 'openai/gpt-6.1-sol'], code:['anthropic/claude-sonnet-5-5', 'openai/gpt-6.1-terra'], execute:['anthropic/claude-haiku-5-5', 'openai/gpt-6-luna'] };
+  const tierOf = id => /opus|sol|fable|astra/.test(id) ? 'think' : /haiku|luna|mini|nano/.test(id) ? 'execute' : 'code';
+  main.querySelectorAll('select[name$=".runtime"]').forEach(s => s.onchange = () => {
+    const ms = main.querySelector(`select[name="${s.name.replace('.runtime', '.model')}"]`), pair = TIERS[tierOf(ms.value)];
+    const pick = pair.find(id => fits(s.value, id) && (s.value !== 'pi' || id === ms.value)) || pair.find(id => fits(s.value, id)) || all.find(id => fits(s.value, id));
+    ms.innerHTML = opts(s.value, pick);
+  });
+  $('#rf').onsubmit = async e => {
+    e.preventDefault(); const f = new FormData(e.target), out = {};
+    for (const r of set.role_names) out[r] = { runtime:f.get(r + '.runtime'), model:f.get(r + '.model') };
+    try { await api('/api/admin/settings', { method:'PUT', headers:{ 'content-type':'application/json' }, body:JSON.stringify({ roles:out, youtrack:{ url:set.youtrack.url, token:'' }, limits:set.limits }) });
+          $('#rmsg').className = 'msg ok'; $('#rmsg').textContent = 'Saved. New jobs use these.'; }
+    catch (err) { $('#rmsg').className = 'msg err'; $('#rmsg').textContent = err.body?.problems ? Object.entries(err.body.problems).map(([k, v]) => k + ': ' + v).join('; ') : err.message; }
+  };
+}
+
+// ---------- Metrics ----------
+function bars(rows, value, label) {
+  if (!rows.length) return '<p class="empty">Nothing recorded yet.</p>';
+  const max = Math.max(...rows.map(r => r.v)) || 1;
+  return `<div class="bars">${rows.map(r => `<div class="bar" data-tip="${esc(r.tip || '')}"><span class="name" title="${esc(r.k)}">${esc(r.k)}</span>
+    <span class="track"><span class="fill" style="width:${(r.v / max * 100).toFixed(1)}%"></span></span><span class="val">${value(r.v)}</span></div>`).join('')}</div>`;
+}
+function graph(edges) {
+  const list = Object.entries(edges).map(([k, n]) => { const [a, b] = k.split('>'); return { a, b, n }; });
+  if (!list.length) return '<p class="empty">No messages or handoffs yet.</p>';
+  const names = [...new Set(list.flatMap(e => [e.a, e.b]))], R = 110, cx = 200, cy = 150;
+  const pos = Object.fromEntries(names.map((n, i) => { const t = (i / names.length) * Math.PI * 2 - Math.PI / 2; return [n, [cx + Math.cos(t) * R, cy + Math.sin(t) * R * 0.8]]; }));
+  const maxN = Math.max(...list.map(e => e.n));
+  return `<svg viewBox="0 0 400 300" style="width:100%;max-width:520px;max-height:340px;height:auto;display:block;margin:0 auto" role="img" aria-label="Who talks to whom">
+    <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--soft)"/></marker></defs>
+    ${list.map(e => { const [x1, y1] = pos[e.a], [x2, y2] = pos[e.b], dx = x2 - x1, dy = y2 - y1, L = Math.hypot(dx, dy) || 1, ex = x2 - dx / L * 20, ey = y2 - dy / L * 20;
+      return `<g><line x1="${x1}" y1="${y1}" x2="${ex}" y2="${ey}" stroke="var(--soft)" stroke-width="${1 + e.n / maxN * 3}" marker-end="url(#ar)"><title>${esc(e.a)} → ${esc(e.b)}: ${e.n}</title></line>
+        <text x="${(x1 + x2) / 2 + 10}" y="${(y1 + y2) / 2}" text-anchor="start">${e.n}×</text></g>`; }).join('')}
+    ${names.map(n => { const [x, y] = pos[n], ly = y < cy ? y - 24 : y + 32;
+      return `<g><circle cx="${x}" cy="${y}" r="16" fill="var(--card)" stroke="var(--accent)" stroke-width="2"/><text x="${x}" y="${ly}" text-anchor="middle">${esc(n)}</text></g>`; }).join('')}
+  </svg>`;
+}
+async function metrics() {
+  const m = await api('/api/admin/metrics');
+  const byUsd = o => Object.entries(o).map(([k, b]) => ({ k: k || '(none)', v:b.usd, tip:`${fmt(b.requests)} requests · ${fmt(b.input)} in · ${fmt(b.output)} out · ${fmt(b.cache_read)} cached` })).sort((a, b) => b.v - a.v);
+  const t = m.totals;
+  main.innerHTML = `
+  <div class="tiles">
+    <div class="tile"><div class="v">${usd(t.usd)}</div><div class="l">Spent, all jobs</div></div>
+    <div class="tile"><div class="v">${fmt(t.jobs)}</div><div class="l">Jobs</div></div>
+    <div class="tile"><div class="v">${fmt(t.requests)}</div><div class="l">Model requests</div></div>
+    <div class="tile"><div class="v">${fmt(t.input + t.output + t.cache_read)}</div><div class="l">Tokens (${fmt(t.cache_read)} from cache)</div></div>
+  </div>
+  <div class="grid">
+    <div class="card"><h2>Cost by model</h2>${bars(byUsd(m.models), usd)}</div>
+    <div class="card"><h2>Cost by agent</h2>${bars(byUsd(m.agents), usd)}</div>
+    <div class="card"><h2>Time per phase</h2><p class="help">Seconds spent in each state, all jobs together.</p>${bars(Object.entries(m.phase_seconds).map(([k, v]) => ({ k, v, tip:`${v.toFixed(1)} s` })).sort((a, b) => b.v - a.v), v => v.toFixed(1) + ' s')}</div>
+    <div class="card"><h2>Tool calls</h2>${bars(Object.entries(m.tools).map(([k, v]) => ({ k, v })).sort((a, b) => b.v - a.v), v => fmt(v))}</div>
+  </div>
+  <div class="card"><h2>Who talks to whom</h2><p class="help">Handoffs, check failures sent back, and your messages. Line width shows how often.</p>${graph(m.edges)}</div>
+  <div class="card"><h2>Checks</h2>${Object.keys(m.checks).length ? `<table><tr><th>Command</th><th class="n">Passed</th><th class="n">Failed</th></tr>
+    ${Object.entries(m.checks).map(([c, x]) => `<tr><td class="mono">${esc(c)}</td><td class="n">${x.Passed}</td><td class="n">${x.Failed ? `<span class="pill bad">${x.Failed}</span>` : 0}</td></tr>`).join('')}</table>` : '<p class="empty">No checks run yet.</p>'}</div>
+  <div class="card"><h2>Jobs</h2>${m.jobs?.length ? `<table><tr><th>Job</th><th>Title</th><th>State</th><th class="n">Cost</th><th class="n">Time</th><th class="n">Requests</th><th class="n">Heal loops</th><th class="n">Handoffs</th></tr>
+    ${m.jobs.map(j => `<tr><td class="mono">${esc(j.id)}</td><td>${esc(j.title)}</td><td><span class="pill ${j.state === 'done' ? 'ok' : j.state === 'failed' ? 'bad' : 'warn'}">${esc(j.state)}</span></td>
+      <td class="n">${usd(j.usd)}</td><td class="n">${j.seconds.toFixed(0)} s</td><td class="n">${j.requests}</td><td class="n">${j.loops}</td>
+      <td class="n">${j.handoffs.Written} written${j.handoffs.Missing ? `, ${j.handoffs.Missing} missing` : ''}${j.handoffs.Rejected ? `, ${j.handoffs.Rejected} rejected` : ''}</td></tr>`).join('')}</table>` : '<p class="empty">No jobs yet.</p>'}</div>`;
+  // hover details on bars
+  const tip = $('#tip');
+  main.querySelectorAll('.bar[data-tip]').forEach(b => {
+    b.onmousemove = e => { if (!b.dataset.tip) return; tip.style.display = 'block'; tip.textContent = b.querySelector('.name').textContent + ': ' + b.dataset.tip; tip.style.left = e.clientX + 14 + 'px'; tip.style.top = e.clientY + 14 + 'px'; };
+    b.onmouseleave = () => tip.style.display = 'none';
+  });
+}
+
+// ---------- Prompts: the system prompt per role ----------
+async function prompts() {
+  const list = await api('/api/admin/prompts');
+  main.innerHTML = `<div class="card"><h2>Role prompts</h2><p class="help">Each agent gets its role's prompt on top of its runtime's own system prompt (Pi's, Claude Code's or Codex's).
+    The defaults live in <code>internal/prompts/roles/&lt;role&gt;.md</code>; your edits are saved in <code>~/.factory/prompts/</code> and win over the defaults. Builders run today; the other roles start with the next milestone.</p></div>
+    ${list.map(p => `<div class="card" data-role="${p.role}"><h2>${p.role} ${p.live ? '<span class="pill ok">in use</span>' : '<span class="pill warn">next milestone</span>'} ${p.edited ? '<span class="pill warn">edited</span>' : ''}</h2>
+      <textarea class="prompt">${esc(p.text)}</textarea>
+      <div class="row"><button class="primary" data-save>Save</button>${p.edited ? '<button data-reset>Back to the default</button>' : ''}<span class="msg"></span></div></div>`).join('')}`;
+  main.querySelectorAll('[data-role]').forEach(card => {
+    const role = card.dataset.role, msg = card.querySelector('.msg');
+    card.querySelector('[data-save]').onclick = async () => {
+      try { await api('/api/admin/prompts/' + role, { method:'PUT', headers:{ 'content-type':'application/json' }, body:JSON.stringify({ text:card.querySelector('textarea').value }) }); msg.className = 'msg ok'; msg.textContent = 'Saved. New agents get this.'; }
+      catch (e) { msg.className = 'msg err'; msg.textContent = e.message; } };
+    card.querySelector('[data-reset]')?.addEventListener('click', async () => { await api('/api/admin/prompts/' + role, { method:'DELETE' }); prompts(); });
+  });
+}
+
+// ---------- Skills: mattpocock/skills, chosen per role ----------
+const skillsExtra = new Set();   // skills added from the picker but not saved yet
+async function skills() {
+  const d = await api('/api/admin/skills');
+  const head = `<div class="card"><h2>Skills</h2><p class="help">Skills from <a href="${d.repo}" target="_blank" rel="noopener">${esc(d.repo.replace('https://github.com/', ''))}</a>, kept in <code>${esc(d.dir)}</code>.
+    Pi loads a role's skills natively, Claude Code gets them as a small plugin per role, and Codex gets a list pointing at each SKILL.md.</p>
+    <div class="row"><span class="k">Local copy</span>${d.version ? `<span class="mono">${esc(d.version)}</span>` : '<span class="pill warn">not downloaded</span>'}
+      <button class="primary" id="sync">${d.version ? 'Update' : 'Download'}</button><span class="msg" id="smsg"></span></div></div>`;
+  if (!d.skills?.length) { main.innerHTML = head; bindSync(); return; }
+  // only the skills some role uses, plus any you add from the picker
+  const used = new Set(Object.values(d.by_role).flat()), shown = d.skills.filter(s => used.has(s.name) || skillsExtra.has(s.name));
+  const rest = d.skills.filter(s => !shown.includes(s) && s.name !== 'handoff');
+  const cats = [...new Set(shown.map(s => s.category))];
+  main.innerHTML = head + `<div class="card"><h2>Skills in use</h2><p class="help">Ticked skills go to every new agent in that role. Untick a skill everywhere and save to remove it from this list.</p>
+    <form id="skf"><div style="overflow-x:auto"><table class="skilltab"><tr><th>Skill</th>${d.roles.map(r => `<th class="c">${r}${d.live[r] ? ' ●' : ''}</th>`).join('')}</tr>
+    ${cats.map(c => `<tr><td colspan="${d.roles.length + 1}"><b class="mono" style="color:var(--accent)">${esc(c)}</b></td></tr>` + shown.filter(s => s.category === c).map(s => `<tr>
+      <td><b>${esc(s.name)}</b>${s.user_only ? '<span class="tag">you start it</span>' : ''}<div class="d">${esc(s.description)}</div>${s.note ? `<div class="note">${esc(s.note)}</div>` : ''}</td>
+      ${d.roles.map(r => `<td class="c"><input type="checkbox" name="${r}" value="${esc(s.name)}" ${(d.by_role[r] || []).includes(s.name) ? 'checked' : ''} ${s.name === 'handoff' ? 'disabled' : ''}></td>`).join('')}</tr>`).join('')).join('')}
+    </table></div><div class="row"><button class="primary">Save</button><span class="msg" id="kmsg"></span><span class="help" style="margin:0">● runs today</span></div></form></div>
+    <div class="card"><h2>Add a skill</h2><p class="help">${rest.length} more in the repo. Add one, tick the roles that should get it, and save. Skills marked "you start it" are workflows a person runs; agents won't pick them up alone.</p>
+      <div class="row"><select id="addsk" style="min-width:320px">${rest.map(s => `<option value="${esc(s.name)}">${esc(s.category)} / ${esc(s.name)}${s.user_only ? ' (you start it)' : ''}${s.note ? ' (see note)' : ''}</option>`).join('')}</select>
+        <button id="addbtn">Add to the list</button></div>
+      <p class="help" id="adddesc" style="margin-top:6px"></p></div>`;
+  const desc = () => { const s = rest.find(x => x.name === $('#addsk').value); $('#adddesc').textContent = s ? s.description + (s.note ? ' Note: ' + s.note : '') : ''; };
+  $('#addsk')?.addEventListener('change', desc); desc();
+  $('#addbtn')?.addEventListener('click', () => { skillsExtra.add($('#addsk').value); skills(); });
+  bindSync();
+  $('#skf').onsubmit = async e => {
+    e.preventDefault(); const out = {};
+    for (const r of d.roles) out[r] = [...e.target.querySelectorAll(`input[name="${r}"]:checked`)].map(i => i.value);
+    try { await api('/api/admin/skills', { method:'PUT', headers:{ 'content-type':'application/json' }, body:JSON.stringify(out) }); $('#kmsg').className = 'msg ok'; $('#kmsg').textContent = 'Saved. New agents get these.'; }
+    catch (err) { $('#kmsg').className = 'msg err'; $('#kmsg').textContent = err.message; }
+  };
+}
+function bindSync() {
+  $('#sync').onclick = async () => { $('#smsg').className = 'msg'; $('#smsg').textContent = 'Working…';
+    try { await api('/api/admin/skills/sync', { method:'POST' }); skills(); } catch (e) { $('#smsg').className = 'msg err'; $('#smsg').textContent = e.message; } };
+}
+
+// ---------- Prices: synced from models.dev, editable ----------
+let priceFilter = '', priceAll = false;
+async function prices() {
+  const d = await api('/api/admin/prices');
+  const updated = d.prices.map(p => p.updated).sort().at(-1);
+  const sources = [...new Set(d.prices.map(p => p.source))];
+  const list = d.prices.filter(p => (priceAll || d.used[p.model] || /claude-(opus|sonnet|haiku|fable)-[45]|gpt-6|gpt-5\.[5-6]/.test(p.model)) && p.model.includes(priceFilter))
+                       .sort((a, b) => (d.used[b.model] ? 1 : 0) - (d.used[a.model] ? 1 : 0) || a.model.localeCompare(b.model));
+  const n = v => (+v).toFixed(v < 1 ? 3 : 2);
+  main.innerHTML = `<div class="card"><h2>Prices</h2><p class="help">US dollars per million tokens. Pulled from <a href="https://models.dev" target="_blank" rel="noopener">models.dev</a> (LiteLLM's price list if models.dev doesn't answer) when the engine starts and once a day.
+      Prices you set by hand stay until you reset them. After every change, past costs are worked out again with the new prices.</p>
+    <div class="row"><span class="k">Last update</span>${updated ? `<span>${esc(updated.replace('T', ' ').slice(0, 16))} from ${esc(sources.join(', '))}, ${d.prices.length} models</span>` : '<span class="pill warn">none yet</span>'}
+      <button class="primary" id="psync">Update prices now</button><span class="msg" id="pmsg"></span></div></div>
+  <div class="card"><div class="row" style="border:0"><input type="text" id="pf" placeholder="Filter, e.g. sonnet" value="${esc(priceFilter)}" style="min-width:220px">
+      <label><input type="checkbox" id="pall" ${priceAll ? 'checked' : ''}> show every model</label><span class="help" style="margin:0">● used by a role</span></div>
+    <table><tr><th>Model</th><th class="n">Input</th><th class="n">Output</th><th class="n">Cache read</th><th class="n">Cache write</th><th>Source</th><th></th></tr>
+    ${list.map(p => `<tr data-m="${esc(p.model)}"><td class="mono">${d.used[p.model] ? '● ' : ''}${esc(p.model)}</td>
+      ${['input', 'output', 'cache_read', 'cache_write'].map(k => `<td class="n"><span class="v">$${n(p[k])}</span><input type="number" step="0.001" min="0" name="${k}" value="${p[k]}" style="display:none;width:90px"></td>`).join('')}
+      <td>${p.source === 'manual' ? '<span class="pill warn">set by hand</span>' : esc(p.source)}</td><td><button data-edit>Edit</button></td></tr>`).join('')}
+    </table>${list.length ? '' : '<p class="empty">No prices match.</p>'}</div>`;
+  $('#psync').onclick = async () => { $('#pmsg').className = 'msg'; $('#pmsg').textContent = 'Fetching…';
+    try { const r = await api('/api/admin/prices/sync', { method:'POST' }); $('#pmsg').className = 'msg ok'; $('#pmsg').textContent = `${r.models} models from ${r.source}.`; setTimeout(prices, 900); }
+    catch (e) { $('#pmsg').className = 'msg err'; $('#pmsg').textContent = e.message; } };
+  $('#pf').oninput = e => { priceFilter = e.target.value.trim(); clearTimeout(window.pft); window.pft = setTimeout(prices, 250); };
+  $('#pall').onchange = e => { priceAll = e.target.checked; prices(); };
+  main.querySelectorAll('[data-edit]').forEach(b => b.onclick = async () => {
+    const tr = b.closest('tr'), editing = b.textContent === 'Save';
+    if (!editing) { tr.querySelectorAll('.v').forEach(v => v.style.display = 'none'); tr.querySelectorAll('input').forEach(i => i.style.display = ''); b.textContent = 'Save'; b.classList.add('primary'); return; }
+    const body = { model:tr.dataset.m }; tr.querySelectorAll('input').forEach(i => body[i.name] = +i.value);
+    try { await api('/api/admin/prices', { method:'PUT', headers:{ 'content-type':'application/json' }, body:JSON.stringify(body) }); prices(); }
+    catch (e) { alert(e.message); } });
+}
+
+// ---------- Limits ----------
+async function limits() {
+  const set = await api('/api/admin/settings'), l = set.limits || {};
+  main.innerHTML = `<div class="card"><h2>Limits</h2><p class="help">Off by default, so real usage can be measured first (D34). When on, an agent pauses at its limit and the Inbox asks what to do.</p>
+    <form id="lf"><div class="row"><span class="k">Limits</span><label><input type="checkbox" name="enabled" ${l.enabled ? 'checked' : ''}> turned on</label></div>
+    <div class="row"><span class="k">Per job, USD</span><input type="number" step="0.01" min="0" name="job_usd" value="${l.job_usd || ''}" placeholder="no limit"></div>
+    <div class="row"><span class="k">Per agent, USD</span><input type="number" step="0.01" min="0" name="agent_usd" value="${l.agent_usd || ''}" placeholder="no limit"></div>
+    <div class="row"><span class="k"></span><button class="primary">Save</button><span class="msg" id="lmsg"></span></div></form>
+    <p class="help" style="margin-top:10px">The engine records these now; pausing at the limit arrives with the Inbox.</p></div>`;
+  $('#lf').onsubmit = async e => {
+    e.preventDefault(); const f = new FormData(e.target);
+    const lim = { enabled:f.get('enabled') === 'on', job_usd:+f.get('job_usd') || 0, agent_usd:+f.get('agent_usd') || 0 };
+    try { await api('/api/admin/settings', { method:'PUT', headers:{ 'content-type':'application/json' }, body:JSON.stringify({ roles:set.roles, youtrack:{ url:set.youtrack.url, token:'' }, limits:lim }) });
+          $('#lmsg').className = 'msg ok'; $('#lmsg').textContent = 'Saved.'; }
+    catch (err) { $('#lmsg').className = 'msg err'; $('#lmsg').textContent = err.message; }
+  };
+}
+
+addEventListener('hashchange', () => { const t = location.hash.slice(1); if (t && t !== tab) { tab = t; show(); } });
+show();
+</script>
+</body>
+</html>
