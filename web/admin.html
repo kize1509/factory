@@ -499,27 +499,29 @@ async function prompts() {
   });
 }
 
-// ---------- Skills: mattpocock/skills, chosen per role ----------
+// ---------- Skills: a few skills repos, chosen per role ----------
 const skillsExtra = new Set();   // skills added from the picker but not saved yet
 async function skills() {
   const d = await api('/api/admin/skills');
-  const head = `<div class="card"><h2>Skills</h2><p class="help">Skills from <a href="${d.repo}" target="_blank" rel="noopener">${esc(d.repo.replace('https://github.com/', ''))}</a>, kept in <code>${esc(d.dir)}</code>.
+  const missing = d.sources.some(s => !s.version);
+  const head = `<div class="card"><h2>Skills</h2><p class="help">Skills from these repos, kept in <code>${esc(d.dir)}</code>.
     Pi loads a role's skills natively, Claude Code gets them as a small plugin per role, and Codex gets a list pointing at each SKILL.md.</p>
-    <div class="row"><span class="k">Local copy</span>${d.version ? `<span class="mono">${esc(d.version)}</span>` : '<span class="pill warn">not downloaded</span>'}
-      <button class="primary" id="sync">${d.version ? 'Update' : 'Download'}</button><span class="msg" id="smsg"></span></div></div>`;
+    ${d.sources.map(s => `<div class="row"><span class="k"><a href="${s.repo}" target="_blank" rel="noopener">${esc(s.repo.replace('https://github.com/', ''))}</a></span>
+      ${s.version ? `<span class="mono">${esc(s.version)}</span>` : '<span class="pill warn">not downloaded</span>'}<span class="help" style="margin:0">${esc(s.about)}</span></div>`).join('')}
+    <div class="row"><button class="primary" id="sync">${missing ? 'Download' : 'Update all'}</button><span class="msg" id="smsg"></span></div></div>`;
   if (!d.skills?.length) { main.innerHTML = head; bindSync(); return; }
   // only the skills some role uses, plus any you add from the picker
   const used = new Set(Object.values(d.by_role).flat()), shown = d.skills.filter(s => used.has(s.name) || skillsExtra.has(s.name));
   const rest = d.skills.filter(s => !shown.includes(s) && s.name !== 'handoff');
-  const cats = [...new Set(shown.map(s => s.category))];
+  const cats = [...new Set(shown.map(s => s.category))];  // a repo without categories uses its own name
   main.innerHTML = head + `<div class="card"><h2>Skills in use</h2><p class="help">Ticked skills go to every new agent in that role. Untick a skill everywhere and save to remove it from this list.</p>
     <form id="skf"><div style="overflow-x:auto"><table class="skilltab"><tr><th>Skill</th>${d.roles.map(r => `<th class="c">${r}${d.live[r] ? ' ●' : ''}</th>`).join('')}</tr>
     ${cats.map(c => `<tr><td colspan="${d.roles.length + 1}"><b class="mono" style="color:var(--accent)">${esc(c)}</b></td></tr>` + shown.filter(s => s.category === c).map(s => `<tr>
       <td><b>${esc(s.name)}</b>${s.user_only ? '<span class="tag">you start it</span>' : ''}<div class="d">${esc(s.description)}</div>${s.note ? `<div class="note">${esc(s.note)}</div>` : ''}</td>
       ${d.roles.map(r => `<td class="c"><input type="checkbox" name="${r}" value="${esc(s.name)}" ${(d.by_role[r] || []).includes(s.name) ? 'checked' : ''} ${s.name === 'handoff' ? 'disabled' : ''}></td>`).join('')}</tr>`).join('')).join('')}
     </table></div><div class="row"><button class="primary">Save</button><span class="msg" id="kmsg"></span><span class="help" style="margin:0">● runs today</span></div></form></div>
-    <div class="card"><h2>Add a skill</h2><p class="help">${rest.length} more in the repo. Add one, tick the roles that should get it, and save. Skills marked "you start it" are workflows a person runs; agents won't pick them up alone.</p>
-      <div class="row"><select id="addsk" style="min-width:320px">${rest.map(s => `<option value="${esc(s.name)}">${esc(s.category)} / ${esc(s.name)}${s.user_only ? ' (you start it)' : ''}${s.note ? ' (see note)' : ''}</option>`).join('')}</select>
+    <div class="card"><h2>Add a skill</h2><p class="help">${rest.length} more in the repos. Add one, tick the roles that should get it, and save. Skills marked "you start it" are workflows a person runs; agents won't pick them up alone.</p>
+      <div class="row"><select id="addsk" style="min-width:320px">${rest.map(s => `<option value="${esc(s.name)}">${esc(s.category === s.source ? s.source : s.source + ' / ' + s.category)} / ${esc(s.name)}${s.user_only ? ' (you start it)' : ''}${s.note ? ' (see note)' : ''}</option>`).join('')}</select>
         <button id="addbtn">Add to the list</button></div>
       <p class="help" id="adddesc" style="margin-top:6px"></p></div>`;
   const desc = () => { const s = rest.find(x => x.name === $('#addsk').value); $('#adddesc').textContent = s ? s.description + (s.note ? ' Note: ' + s.note : '') : ''; };

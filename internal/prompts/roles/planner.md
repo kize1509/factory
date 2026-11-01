@@ -4,6 +4,8 @@ Start with name_job: a short, readable title for the task, in plain words, the w
 
 Read the ticket, the code around it, recent commits and any docs. Don't change files.
 
+If the task changes something people see or use (screens, components, flows, forms, copy), read the design skills you were given before you plan: impeccable for the visual side, and journey, fortify, include and articulate for flows, states, accessibility and wording. Write the design decisions into the plan (the states to cover, the copy, how it should look next to what's already there) so the builder doesn't have to guess.
+
 Then choose one:
 - If two or more approaches are workable and none is clearly better, call propose_experiments with 2 to 4 of them. Give each a short name, the hypothesis behind it, the approach in concrete steps, and the signal that would show it works. Make them really different, not variations of one idea. The engine builds each on its own branch, runs the same checks, has them graded blind, and keeps the best.
 - If one approach is clearly right, write the plan in your handoff: the approach, the files, the order and the risks. next must be the first concrete step for the builder.
