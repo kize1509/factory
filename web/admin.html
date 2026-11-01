@@ -175,7 +175,7 @@ async function jobs() {
             <b>${esc(j.title || j.id)}</b><span class="id">${esc(j.issue || j.id)}</span></div>
           <div class="facts"><span>started <b>${ago(j.started)}</b></span><span>time <b>${Math.round(s.seconds || 0)} s</b></span><span>cost <b>${usd(s.usd || 0)}</b></span>
             <span>runtime <b>${esc(j.runtime || 'pi')} · ${esc((j.model || '').split('/').pop())}</b></span><span>heal loops <b>${s.loops || 0}</b></span>
-            <span>repo <b class="mono">${esc(j.repo)}</b></span>${j.branch ? `<span>branch <b class="mono">${esc(j.branch)}</b></span>` : ''}${j.commit ? `<span>commit <b class="mono">${esc(j.commit)}</b></span>` : ''}</div>
+            <span>repo <b class="mono">${esc(j.repo)}</b></span>${j.branch ? `<span>branch <b class="mono">${esc(j.branch)}</b></span>` : ''}${j.commit ? `<span>commit <b class="mono">${esc(j.commit)}</b></span>` : ''}${/^https:\/\//.test(j.pr || '') ? `<span>pull request <a class="mono" href="${esc(j.pr)}" target="_blank" rel="noopener">${esc(j.pr.replace(/^https:\/\/github\.com\//, ''))}</a></span>` : ''}</div>
           ${st === 'waiting' ? `<div class="q"><b>Question:</b> ${esc(j.question)}</div><form class="acts answer"><input type="text" name="a" placeholder="Your answer" required style="flex:1;min-width:220px"><button class="primary">Send answer</button></form>` : ''}
           ${st === 'failed' && j.error ? `<div class="e">${esc(j.error)}</div>` : ''}
           <div class="acts">${EMBED ? '<button data-map>Show on the map</button>' : ''}${st === 'running' || st === 'waiting' ? '<button data-stop>Stop job</button>' : ''}<span class="msg"></span></div>

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"path/filepath"
 	"testing"
 	"time"
@@ -39,5 +40,34 @@ func TestJobsEventsPrices(t *testing.T) {
 	ps, _ := s.Prices()
 	if len(ps) != 1 || ps[0].Input != 1 {
 		t.Fatalf("%+v", ps)
+	}
+}
+
+func TestPRURLStoredAndOldDatabaseUpgraded(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "f.db")
+	// a database from before pr_url existed
+	old, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := old.Exec(`CREATE TABLE jobs (id TEXT PRIMARY KEY, issue TEXT, title TEXT, repo TEXT, spec TEXT NOT NULL, state TEXT,
+		branch TEXT, commit_sha TEXT, error TEXT, started TEXT, updated TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	old.Close()
+	for i := 0; i < 2; i++ { // opening twice must not fail on the existing column
+		s, err := Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s.Close()
+	}
+	s, _ := Open(path)
+	defer s.Close()
+	s.SaveJob("J1", "HF-1", "fix it", "/repo", map[string]any{"id": "J1"}, time.Now())
+	s.AddEvent(events.Event{Job: "J1", Type: "job.pr_opened", Time: time.Now(), Data: map[string]any{"url": "https://github.com/o/r/pull/7"}})
+	jobs, _ := s.Jobs()
+	if len(jobs) != 1 || jobs[0].PR != "https://github.com/o/r/pull/7" {
+		t.Fatalf("%+v", jobs)
 	}
 }
