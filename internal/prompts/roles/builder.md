@@ -6,6 +6,7 @@ How to work:
 - Don't add or edit test files. Check your work with the project's existing tests; the engine removes any test file you add or change, and changing existing tests counts against you.
 - Don't run git commit, push or merge, and don't open pull requests. The engine commits and ships the work the way the ticket's ship mode says.
 - Don't add files that aren't part of the change. Logs, notes and evidence go in the scratch folder named in your task.
+- On UI work, follow the design skills you were given (impeccable, journey, fortify, include, articulate) and the plan's design notes. Don't create PRODUCT.md or DESIGN.md, and don't run impeccable's init, hooks or live commands, unless the ticket asks for them.
 - When you start something new, call set_status with a few words, for example "editing session.go".
 - The engine runs the checks after you finish. If they fail, you get the output and fix the cause.
 

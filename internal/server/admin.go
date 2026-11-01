@@ -392,7 +392,7 @@ func (s *Server) resetPrompt(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"ok": true})
 }
 
-// skills: the local copy of mattpocock/skills and which role gets which
+// skills: local copies of the skills repos and which role gets which
 
 func (s *Server) getSkills(w http.ResponseWriter, _ *http.Request) {
 	e := config.LoadEngine()
@@ -400,18 +400,27 @@ func (s *Server) getSkills(w http.ResponseWriter, _ *http.Request) {
 	for _, role := range config.RoleNames {
 		byRole[role] = e.SkillsFor(role)
 	}
-	writeJSON(w, map[string]any{"repo": skills.Repo, "dir": skills.Dir(), "version": skills.Version(),
+	type source struct {
+		skills.Source
+		Dir     string `json:"dir"`
+		Version string `json:"version"`
+	}
+	var sources []source
+	for _, src := range skills.Sources {
+		sources = append(sources, source{src, src.Dir(), src.Version()})
+	}
+	writeJSON(w, map[string]any{"sources": sources, "dir": skills.Root(),
 		"skills": skills.List(), "roles": config.RoleNames, "by_role": byRole, "live": liveRoles})
 }
 
 func (s *Server) syncSkills(w http.ResponseWriter, _ *http.Request) {
 	v, err := skills.Sync()
+	s.Bus.Emit("", "", "skills.synced", map[string]any{"versions": v})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
-	s.Bus.Emit("", "", "skills.synced", map[string]any{"version": v})
-	writeJSON(w, map[string]any{"version": v})
+	writeJSON(w, map[string]any{"versions": v})
 }
 
 func (s *Server) putSkills(w http.ResponseWriter, r *http.Request) {

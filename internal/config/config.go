@@ -126,14 +126,17 @@ func CheckRole(r Role) string {
 	return ""
 }
 
-// DefaultSkills picks model-invoked skills from mattpocock/skills that fit
-// each role without breaking the factory's rules (no test writing, its own
-// handoff).
+// DefaultSkills picks model-invoked skills that fit each role without
+// breaking the factory's rules (no test writing, its own handoff). The
+// design skills (impeccable, and journey, fortify, include and articulate
+// from Intent) only trigger on UI and UX work, so other tasks don't pay
+// for them beyond a line each in the skill list.
 func DefaultSkills() map[string][]string {
+	design := []string{"impeccable", "journey", "fortify", "include", "articulate"}
 	return map[string][]string{
 		"researcher": {"research"},
-		"planner":    {"domain-modeling", "codebase-design"},
-		"builder":    {"diagnosing-bugs", "codebase-design"},
+		"planner":    append([]string{"domain-modeling", "codebase-design"}, design...),
+		"builder":    append([]string{"diagnosing-bugs", "codebase-design"}, design...),
 		"reviewer":   {"code-review", "grilling"},
 		"humanizer":  {"writing-for-agents"},
 		"finalizer":  {"pr"},
