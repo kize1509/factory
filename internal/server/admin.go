@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -186,6 +187,26 @@ type metrics struct {
 	Phases map[string]float64   `json:"phase_seconds"`
 	Edges  map[string]int       `json:"edges"` // "from>to" -> count
 	Checks map[string]*checkTot `json:"checks"`
+	// Messages are the individual events behind Edges, newest last.
+	Messages []edgeMsg `json:"messages"`
+}
+
+type edgeMsg struct {
+	Job  string    `json:"job"`
+	Time time.Time `json:"time"`
+	From string    `json:"from"`
+	To   string    `json:"to"`
+	Kind string    `json:"kind"` // handoff | check | you
+	Text string    `json:"text"`
+}
+
+// short trims s to n runes for the message list.
+func short(s string, n int) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if r := []rune(s); len(r) > n {
+		return string(r[:n-1]) + "…"
+	}
+	return s
 }
 
 type bucket struct {
@@ -213,7 +234,7 @@ type jobMetric struct {
 
 func (s *Server) adminMetrics(w http.ResponseWriter, _ *http.Request) {
 	m := metrics{Models: map[string]*bucket{}, Agents: map[string]*bucket{}, Tools: map[string]int{}, Phases: map[string]float64{},
-		Edges: map[string]int{}, Checks: map[string]*checkTot{}}
+		Edges: map[string]int{}, Checks: map[string]*checkTot{}, Messages: []edgeMsg{}}
 	s.mu.Lock()
 	ids := make([]string, 0, len(s.jobs))
 	titles := map[string]string{}
@@ -273,14 +294,18 @@ func (s *Server) adminMetrics(w http.ResponseWriter, _ *http.Request) {
 					m.Checks[c].Passed++
 				} else {
 					m.Checks[c].Failed++
-					m.Edges["oracle>"+agentOr(e, "archimedes")]++
+					to := agentOr(e, "archimedes")
+					m.Edges["oracle>"+to]++
+					m.Messages = append(m.Messages, edgeMsg{id, e.Time, "oracle", to, "check", short(c+" (exit "+strconv.Itoa(int(num(d["exit_code"])))+")", 200)})
 				}
 			case "checks.failed":
 				jm.Loops++
 			case "handoff.written":
 				jm.Handoffs.Written++
 				if n, ok := d["note"].(map[string]any); ok {
-					m.Edges[e.Agent+">"+strings.Fields(str(n["to"]) + " next")[0]]++
+					to := strings.Fields(str(n["to"]) + " next")[0]
+					m.Edges[e.Agent+">"+to]++
+					m.Messages = append(m.Messages, edgeMsg{id, e.Time, e.Agent, to, "handoff", short(str(n["did"])+" → "+str(n["next"]), 200)})
 				}
 			case "handoff.missing":
 				jm.Handoffs.Missing++
@@ -288,12 +313,17 @@ func (s *Server) adminMetrics(w http.ResponseWriter, _ *http.Request) {
 				jm.Handoffs.Rejected++
 			case "human.message":
 				m.Edges["you>"+e.Agent]++
+				m.Messages = append(m.Messages, edgeMsg{id, e.Time, "you", e.Agent, "you", short(str(d["text"]), 200)})
 			}
 		}
 		jm.Seconds = last.Sub(first).Seconds()
 		m.Jobs = append(m.Jobs, jm)
 	}
 	m.Totals.Jobs = len(m.Jobs)
+	sort.SliceStable(m.Messages, func(i, j int) bool { return m.Messages[i].Time.Before(m.Messages[j].Time) })
+	if len(m.Messages) > 500 {
+		m.Messages = m.Messages[len(m.Messages)-500:]
+	}
 	writeJSON(w, m)
 }
 
