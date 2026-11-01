@@ -2,14 +2,34 @@
 
 Every image the web app uses is listed here. The build writes the machine-readable copy to `web/assets/manifest.js`. The app loads assets only from this catalogue (PRD D30). An asset is done when it's drawn, exported, and shown correctly on the preview page.
 
+In short: all art is pixel art drawn in Go code from one palette, built ahead of time into `web/assets/`. The app picks a prepared scene setup for what a job is doing and fills in the agents.
+
+```mermaid
+flowchart LR
+    P["art/palette.go: one palette, day and dusk"] --> B["go run ./cmd/artbuild"]
+    S1["art/scene.go, art/buildings.go: scenery and buildings"] --> B
+    S2["art/portraits.go: portraits from traits"] --> B
+    S3["art/src/icon/*.px: icons and badges"] --> B
+    B --> O["web/assets/: PNGs, strips, manifest.js"]
+    B --> V["web/assets/preview.html"]
+    O --> A["web app: scene setup for the job's state"]
+```
+
+The city is laid out along the Sacred Way. Stations are numbered in the order work passes them:
+
+```mermaid
+flowchart LR
+    G1["1 Gates"] --> G2["2 Library"] --> G3["3 Council house"] --> G4["4 Academy (4b Symposium)"] --> G5["5 Workshop"] --> G6["6 Oracle"] --> G7["7 Areopagus"] --> G8["8 Harbour"]
+```
+
 ## 1. Rules
 
 - Pixel art only, drawn at native size and scaled by whole numbers with nearest-neighbour scaling.
 - The world is drawn at 1280×720 and enlarged 2× at build time to 2560×1440, so buildings are about twice the size of the people and agents fit in front of them. Portraits are not enlarged. The world is 1280×720 in drawing units. The city takes the middle 640×360, and the rest is countryside, mountains and sea to explore.
-- The city is laid out along the Sacred Way, one road from the Gates in the west to the Harbour in the east, with the stations numbered in the order work passes them: 1 Gates, 2 Library, 3 Council house, 4 Academy (4b Symposium), 5 Workshop, 6 Oracle right above it, 7 Areopagus, 8 Harbour. The Agora and the Theatre sit off the road. Portraits are 32×32 (and 64×64 for the agent drawer). Icons are 16×16. Role badges are 12×12.
+- The city is laid out along the Sacred Way, one road from the Gates in the west to the Harbour in the east, with the stations numbered as in the diagram above. The Oracle sits right above the Workshop. The Agora and the Theatre sit off the road. Portraits are 32×32 (and 64×64 for the agent drawer). Icons are 16×16. Role badges are 12×12.
 - Every asset uses only the palette in §2. No anti-aliasing and no gradients except by dithering.
 - Light comes from the top left. Outlines are deep navy (`ink`), not black.
-- The look is Hellenic: whitewashed marble, Aegean blues, gold and olive, with terracotta only on roofs and pottery. The UI uses the same colours: white and navy, Aegean blue for actions, gold for highlights, and a meander strip under the header.
+- The look is Hellenic: whitewashed marble, Aegean blues, gold and olive, with terracotta only on roofs and pottery. The UI uses the same colours: white and navy, Aegean blue for actions, gold for highlights, and a meander strip under the header. The same look is summarized in PRD §10.1a.
 - Each asset with a dusk version has the same shape in both. Only the palette mapping changes.
 - Animations are short loops of 2 to 6 frames at 6 to 8 fps. Nothing walks.
 - Files live in `web/assets/<group>/<id>.png`. Animated assets are strips named `<id>.strip<frames>.png`. One texture atlas per group is built from these for PixiJS.

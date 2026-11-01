@@ -1,12 +1,30 @@
 # Factory harness PRD (draft v0.4)
 
-Status: brainstorm. Settled points are in the decisions table in §5. Open questions are at the end.
+Status: brainstorm. Settled points are in the decisions table in §5. Open questions are at the end. How the engine is built is in `docs/ENGINE.md`.
 
 ## 1. Summary
 
 Factory is a Go engine with a minimal web interface. You give it YouTrack task IDs, and it hands each one to a team of headless coding agents running on Pi, Claude and Codex. The agents research, plan, build and review in fixed roles. The loop repeats until the checks the user picked pass and the reviewers sign off. Then the work is committed, pushed or opened as a PR, depending on the project.
 
 A web canvas set in ancient Greece shows each agent as a philosopher. You can see where each one is, what it's doing, what it says to the others, and the screenshots and videos it uploads.
+
+```mermaid
+flowchart TD
+    T["Ticket + complexity hint"] --> S0["0. Survey: list every way to check the result"]
+    S0 --> U{"User picks checks"}
+    U --> SCH["Scheduler (Solon) splits the work"]
+    SCH --> R["1. Research"]
+    R --> P["2. Plan"]
+    P -->|"more than one approach"| SYM["Symposium"]
+    P --> B["3. Build"]
+    SYM --> B
+    B --> C["4. Check"]
+    C -->|"fail: diagnose"| B
+    C -->|"same errors keep coming"| SYM
+    C -->|pass| RV["5. Review"]
+    RV -->|"blocking findings"| B
+    RV -->|"signed off"| F["6. Finalize: humanizer, docs cleanup, commit / push / PR, ticket to review"]
+```
 
 ## 2. Problem
 
@@ -71,11 +89,11 @@ Agents that run unattended leave no record a person can follow afterwards.
 | D31 | Runtimes and models are managed in the admin panel, not in code or `factory.yml`. Claude Code runs only Claude models, Codex runs only GPT models, and Pi runs both. Pi is the primary runtime and the default for every role, on the Claude model of the role's tier. |
 | D32 | All model traffic goes through JetBrains Central's local wire proxy (no API keys). The engine runs a metering proxy in front of it. See `docs/WIRE.md`. |
 | D33 | Cost is tracked live in US dollars for every job and every agent and shown on the canvas. You can pause, stop or switch model at any moment. |
+| D34 | No budgets or limits by default, so real usage can be measured first. Limits can be turned on later in the admin panel. The admin panel has a Metrics tab that records everything: agent communication, tokens, cost, time and movement through the pipeline. |
+| D35 | Clicking an agent always shows its live internal thoughts. You can send it information from there at any moment, which interrupts its current step. A UFO flies in and beams the message down, so you can see on the map who just got new input. |
 | D36 | The engine tracks every process and container pod an agent starts: command, pid or container id, port, CPU, memory, run time and exit code. You can see them per agent and across all cities, and stop any of them. |
 | D37 | An agent that needs you can't be missed: it waves, its bubble pulses with a "Needs you" tag, its city's chip pulses, and on the Aegean its city sends up a beacon. Clicking it and answering sends the reply by UFO, and it goes back to work. |
 | D38 | Information passes between agents only through handoff notes with a fixed shape (§7.6). The engine checks every note. If one is missing or incomplete, the engine sends the same agent back, in the same session, to write it. A note with open questions stops the job until they are answered. |
-| D34 | No budgets or limits by default, so real usage can be measured first. Limits can be turned on later in the admin panel. The admin panel has a Metrics tab that records everything: agent communication, tokens, cost, time and movement through the pipeline. |
-| D35 | Clicking an agent always shows its live internal thoughts. You can send it information from there at any moment, which interrupts its current step. A UFO flies in and beams the message down, so you can see on the map who just got new input. |
 
 ## 6. Concepts
 
@@ -95,32 +113,18 @@ Agents that run unattended leave no record a person can follow afterwards.
 
 ## 7. Pipeline
 
-```
-TICKET + complexity hint
-   │
-   ▼
-0. SURVEY        agents look for every way to check the result
-   │             (tests, e2e, typecheck, lint, build, run the app, scripts)
-   ▼
-   USER PICKS    which checks to use, none, or "build a new one for this"
-   │             (plan approval gate requested here if wanted)
-   ▼
-   SCHEDULER     Solon splits the work and asks the engine to start agents
-   │
-   ▼
-1. RESEARCH      ticket, dependencies, docs, related work, working tree
-   ▼
-2. PLAN          working docs + diagrams ── more than one approach? ──► SYMPOSIUM
-   ▼
-3. BUILD ◄───────────────────────┐
-   ▼                             │
-4. CHECK   fail ─► diagnose ─────┘  same errors keep coming? ──► SYMPOSIUM
-   │ pass
-   ▼
-5. REVIEW        blocking findings go back to BUILD
-   ▼
-6. FINALIZE      humanizer, docs cleanup, commit / push / PR, ticket to review
-```
+The pipeline diagram is in §1. The steps are:
+
+| Step | What happens |
+|---|---|
+| 0. Survey | Agents look for every way to check the result: tests, e2e, typecheck, lint, build, running the app, scripts. The user then picks the checks. Plan approval is requested here if wanted. |
+| Scheduler | Solon splits the work and asks the engine to start agents. |
+| 1. Research | Ticket, dependencies, docs, related work, working tree. |
+| 2. Plan | Working docs and diagrams. More than one workable approach opens a Symposium. |
+| 3. Build | Builders implement. |
+| 4. Check | A failure is diagnosed and goes back to build. The same errors coming back open a Symposium. |
+| 5. Review | Blocking findings go back to build. |
+| 6. Finalize | Humanizer, docs cleanup, commit, push or PR, ticket to review. |
 
 ### 7.1 Survey and check plan
 
@@ -146,22 +150,19 @@ A Symposium opens when one of these happens:
 - the same check fails the same way twice in a row
 - the build loop fails `n` times in total (configurable)
 
-```
-              job branch  factory/ABC-123
-                    │
-     ┌──────────────┼──────────────┐       propose_experiment(hypothesis)
-     ▼              ▼              ▼       the engine creates a branch + worktree for each
- exp/ABC-123/1  exp/ABC-123/2  exp/ABC-123/3
- "cache layer"  "fix query"    "batch writes"
-     │              │              │       one builder per branch
-   checks         checks         checks    same check plan, same base commit
-     │              │              │
-   grades         grades         grades    the same reviewers grade every branch
-     └──────────────┼──────────────┘
-                    ▼
-            engine computes scores, picks the winner
-                    ▼
-   winner merged into the job branch, the rest archived in .factory/
+```mermaid
+flowchart TD
+    J["job branch factory/ABC-123"] -->|"propose_experiment(hypothesis): the engine makes a branch and worktree for each"| E1["exp/ABC-123/1 cache layer"]
+    J --> E2["exp/ABC-123/2 fix query"]
+    J --> E3["exp/ABC-123/3 batch writes"]
+    E1 -->|"one builder per branch, same check plan, same base commit"| K1["checks"]
+    E2 --> K2["checks"]
+    E3 --> K3["checks"]
+    K1 -->|"the same reviewers grade every branch"| G["grades"]
+    K2 --> G
+    K3 --> G
+    G --> W["engine computes scores and picks the winner"]
+    W --> M["winner merged into the job branch, the rest archived in .factory/"]
 ```
 
 The engine scores each experiment in three steps:
@@ -234,14 +235,33 @@ Fields:
 | `next` | yes | the concrete first step for whoever comes next |
 | `evidence` | no | paths to docs, diagrams, check results or media |
 
-How the engine enforces it:
+The engine enforces it like this:
 
-1. When an agent finishes its phase, the engine looks for its handoff note.
-2. It checks the note: valid YAML, every required field present, `did` and `next` not empty, every path in `files` and `evidence` exists in the worktree or `.factory/`.
-3. If the note is missing or fails a check, the engine resumes the same agent in the same session with a short prompt: "Your handoff is missing or incomplete: <what is wrong>. Write it with the handoff tool." The agent still has its full context, so it can write an accurate note.
-4. It tries this up to 2 times. If the note is still not valid, the job pauses and an Inbox card asks you to write or fix it.
-5. If `open_questions` is not empty, the next phase doesn't start. The questions go to the agent who can answer them (named in the question) or to you, and the answers are added to the note.
-6. Every step is an event: `handoff.written`, `handoff.missing`, `handoff.rejected` (with the reason), `handoff.rewritten`, `handoff.blocked`. Missing handoffs per role show up in the Metrics tab.
+```mermaid
+sequenceDiagram
+    participant A as Agent
+    participant E as Engine
+    participant H as You (Inbox)
+    A->>E: phase finished
+    E->>E: look for the note, validate it
+    alt note missing or invalid
+        loop up to 2 times
+            E->>A: resume same session: "Your handoff is missing or incomplete: ..."
+            A->>E: handoff(note)
+        end
+        E->>H: still invalid: card asks you to write or fix it
+    end
+    alt open_questions not empty
+        E->>A: ask the named agent
+        E->>H: or ask you
+        Note over E: next phase waits, answers are added to the note
+    end
+    E->>E: start the next phase
+```
+
+The checks on a note are: valid YAML, every required field present, `did` and `next` not empty, and every path in `files` and `evidence` exists in the worktree or `.factory/`. The agent is resumed in the same session, so it still has its full context and can write an accurate note.
+
+Every step is an event: `handoff.written`, `handoff.missing`, `handoff.rejected` (with the reason), `handoff.rewritten`, `handoff.blocked`. Missing handoffs per role show up in the Metrics tab.
 
 The humanizer pass applies to handoff notes too, so they stay short and plain.
 
@@ -267,7 +287,7 @@ Each role's prompt is a short markdown file (`prompts/<role>.md`). Config sets w
 
 ## 9. Agent runtimes
 
-All agents run headless and stream JSON events. The engine turns them into one event format.
+All agents run headless and stream JSON events. The engine turns them into one event format. The Go interface and the Pi sidecar protocol are in `docs/ENGINE.md` §4 and §5.
 
 | Runtime | How it runs |
 |---|---|
@@ -277,7 +297,7 @@ All agents run headless and stream JSON events. The engine turns them into one e
 
 ### 9.1 Models
 
-Default catalogue, read from the wire and editable in the admin panel (§12.2). The wire offers a newer GPT generation than 5.6, so the defaults use it:
+Default catalogue, read from the wire and editable in the admin panel (§12.2). The wire offers a newer GPT generation than 5.6, so the defaults use it. The list of models the wire serves is in `docs/WIRE.md` §2.
 
 | Tier | Claude | GPT | Used for |
 |---|---|---|---|
@@ -334,6 +354,8 @@ Each phase is a place in one pixel-art landscape: a coastal Greek city on a hill
 In the multi-job view each job is a city-state on a map. The Assembly is drawn as roads between the cities, with messengers carrying the announcements.
 
 ### 10.1a Art direction
+
+The full rules, palette, asset list and scene setups are in `docs/ART_CATALOGUE.md`. In short:
 
 - The scene is drawn at 640×360. It is scaled up by a whole number with nearest-neighbour scaling first, then fitted to the window, so pixels stay sharp at any size.
 - The palette is Hellenic: whitewashed marble, Aegean blues, gold, olive and navy ink, with terracotta only on roofs and pottery. Dusk swaps it for sunset colours over a dark Aegean.
@@ -416,7 +438,7 @@ Media cards appear next to the agent that made them. Each job also has a gallery
 - Diagrams from `draw()` appear as cards that can be pinned or enlarged.
 - A timeline lets you replay a finished job from its event log, with portraits, bubbles and media in order.
 
-The Go engine serves the UI, streams events over WebSocket and serves media from `.factory/`. The canvas uses PixiJS, because it renders pixel art sharply at whole-number scales and handles many small animated parts well. The top bar, Inbox, Jobs, Settings and the agent drawer are plain HTML on top of it.
+The Go engine serves the UI, streams events and serves media from `.factory/`. The transport is server-sent events (see `docs/ENGINE.md` §2). The canvas uses PixiJS, because it renders pixel art sharply at whole-number scales and handles many small animated parts well. The top bar, Inbox, Jobs, Settings and the agent drawer are plain HTML on top of it.
 
 ### 10.6 Local storage
 
@@ -445,13 +467,15 @@ The Go engine serves the UI, streams events over WebSocket and serves media from
     ABC-123-exp-1/                    # experiment branch
 ```
 
+What is actually built so far, and where the engine keeps its data, is in `docs/ENGINE.md` §8.
+
 ## 11. Isolation: worktrees and containers
 
 A git worktree is a second checkout of the same repo on its own branch. It keeps agents from editing each other's files, and that's all it isolates. Agents in a worktree still run as you, on your machine, with your home directory, credentials, network, ports and running processes.
 
 A container runs the agent in its own filesystem, process space and network. Only the job's worktree and the secrets the engine passes in are visible. It can also run the job's own app and database without clashing with other jobs.
 
-The two work together, and the factory uses both (D19):
+The factory uses both (D19):
 
 - Every job and every experiment gets its own worktree. Agents work in it directly on the host.
 - E2e checks run in a container. The engine starts the app, its services and the e2e runner inside the container, with the job's worktree mounted. Parallel jobs then don't fight over ports or a shared database, and videos and screenshots are copied out to `.factory/jobs/<job>/media/`.
@@ -480,7 +504,7 @@ The interface has three screens and one drawer. Nothing else.
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-- Top bar: ⚙ Admin and ＋ New task next to the logo (keys A and N). New task asks for an issue ID and optional notes; the engine loads the ticket from YouTrack. Repository, checks, runtime and model sit in a folded section and are remembered.
+- Top bar: Admin and New task next to the logo (keys A and N). New task asks for an issue ID and optional notes; the engine loads the ticket from YouTrack. Repository, checks, runtime and model sit in a folded section and are remembered.
 - Inbox: everything waiting for you, with one card per item and a button on each. That covers check plans to pick, plans to approve, agent questions and finished jobs to look at. The count shows in the top bar.
 - Jobs: a list of running and finished jobs, each opening its canvas. Running jobs also appear as city-states on the map view.
 - Settings: the admin panel (§12.2).
@@ -560,28 +584,35 @@ docs:
 
 ## 14. Architecture
 
+The planned architecture:
+
+```mermaid
+flowchart TD
+    TR["Trackers (YouTrack, ...)"] --> IN
+    subgraph ENG["Go engine"]
+        IN["Intake"] --> SV["Survey"]
+        SV --> CP["Check plan (user picks)"]
+        CP --> JSM["Job state machine"]
+        ASM["Assembly (cross-job leases)"] <--> JSM
+        SCH["Scheduler requests"] --> JSM
+        JSM --> SUP["Agent supervisor (start, stream, stop)"]
+        SUP --> PI["pi-host (Node, Pi SDK)"]
+        SUP --> CL["claude (CLI)"]
+        SUP --> CX["codex (CLI)"]
+        PI --> MCP["MCP tools"]
+        CL --> MCP
+        CX --> MCP
+        MCP --> BRD["Board, Symposium scoring, check runner"]
+        BRD --> BUS["Event bus"]
+        BUS --> ES["Event store (JSONL + SQLite)"]
+        BUS --> AS["Artifact store (.factory/)"]
+        BUS --> SRV["HTTP + SSE server"]
+    end
+    JSM --> OUT["git / PR / ticket"]
+    SRV --> WEB["Web canvas (browser)"]
 ```
-                   ┌─────────────────────── Go engine ───────────────────────┐
-Trackers ────────► │ Intake ─► Survey ─► Check plan (user) ─► Job state machine │ ──► git / PR / ticket
-(YouTrack, ...)    │                                        │                 │
-                   │   Assembly (cross-job leases)    Scheduler requests      │
-                   │                                        │                 │
-                   │            Agent supervisor (start, stream, stop)        │
-                   │              │               │               │           │
-                   │         pi-host (Node,     claude          codex         │
-                   │         Pi SDK)            (CLI)           (CLI)         │
-                   │              └──── MCP tools ┴───────────────┘           │
-                   │                         │                                │
-                   │     Board, Symposium scoring, check runner               │
-                   │                         │                                │
-                   │     Event bus ──► Event store (JSONL + SQLite)           │
-                   │                └─► Artifact store (.factory/)            │
-                   │                         │                                │
-                   │              HTTP + WebSocket server                     │
-                   └─────────────────────────┬────────────────────────────────┘
-                                             ▼
-                                   Web canvas (browser)
-```
+
+What exists in M0 today is in `docs/ENGINE.md` §1.
 
 ## 15. Phasing
 
