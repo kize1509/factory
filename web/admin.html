@@ -57,6 +57,23 @@
   .empty { color:var(--soft); font-style:italic }
   .offline { background:color-mix(in srgb, var(--warn) 20%, var(--card)); border-color:var(--warn) }
   svg text { fill:var(--fg); font:11px Inter, sans-serif }
+  .cg { position:relative }
+  .cg svg { width:100%; height:460px; display:block; background:var(--bg); border:1px solid var(--grid); border-radius:4px; touch-action:none; cursor:grab; user-select:none }
+  .cg svg:focus-visible { outline:2px solid var(--accent) }
+  .cg svg text.h { paint-order:stroke; stroke:var(--card); stroke-width:3px; stroke-linejoin:round }
+  .cg .nd { cursor:pointer; outline:none } .cg .ed { cursor:pointer; outline:none }
+  .cg .nd, .cg .ed { transition:opacity .12s }
+  .cg .dim { opacity:.14 }
+  .cg .nd:focus-visible circle, .cg .nd.sel circle { stroke:var(--accent); stroke-width:4 }
+  .cg .ed:focus-visible .vis, .cg .ed.sel .vis { filter:drop-shadow(0 0 3px var(--fg)) }
+  .cgbar { display:flex; gap:6px; margin-bottom:8px }
+  .cglegend { display:flex; gap:6px 16px; flex-wrap:wrap; margin-top:8px; font-size:12px; color:var(--soft) }
+  .cglegend i { display:inline-block; width:18px; height:4px; margin-right:6px; vertical-align:middle; border-radius:2px }
+  .cgpanel { margin-top:10px; padding:10px 12px; border:1px solid var(--grid); border-radius:4px; min-height:64px }
+  .cgpanel h3 { margin:0 0 6px; font:600 14px Inter, sans-serif; display:flex; gap:8px; align-items:center }
+  .cgpanel .dot { width:12px; height:12px; border-radius:50%; border:2px solid var(--fg) }
+  .cgstats { display:flex; gap:6px 20px; flex-wrap:wrap; font-size:13px; color:var(--soft) } .cgstats b { color:var(--fg); font-size:16px }
+  .cgmsgs { margin:0; padding:0; list-style:none; max-height:220px; overflow:auto; font-size:12.5px } .cgmsgs li { padding:4px 0; border-top:1px solid var(--grid) }
   .embed header h1, .embed header .btn { display:none }
   .embed header { top:0 }
   .st { font:10px Silkscreen, monospace; padding:3px 8px; border-radius:3px; white-space:nowrap; display:inline-flex; gap:6px; align-items:center }
@@ -251,20 +268,186 @@ function bars(rows, value, label) {
   return `<div class="bars">${rows.map(r => `<div class="bar" data-tip="${esc(r.tip || '')}"><span class="name" title="${esc(r.k)}">${esc(r.k)}</span>
     <span class="track"><span class="fill" style="width:${(r.v / max * 100).toFixed(1)}%"></span></span><span class="val">${value(r.v)}</span></div>`).join('')}</div>`;
 }
-function graph(edges) {
-  const list = Object.entries(edges).map(([k, n]) => { const [a, b] = k.split('>'); return { a, b, n }; });
-  if (!list.length) return '<p class="empty">No messages or handoffs yet.</p>';
-  const names = [...new Set(list.flatMap(e => [e.a, e.b]))], R = 110, cx = 200, cy = 150;
-  const pos = Object.fromEntries(names.map((n, i) => { const t = (i / names.length) * Math.PI * 2 - Math.PI / 2; return [n, [cx + Math.cos(t) * R, cy + Math.sin(t) * R * 0.8]]; }));
-  const maxN = Math.max(...list.map(e => e.n));
-  return `<svg viewBox="0 0 400 300" style="width:100%;max-width:520px;max-height:340px;height:auto;display:block;margin:0 auto" role="img" aria-label="Who talks to whom">
-    <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--soft)"/></marker></defs>
-    ${list.map(e => { const [x1, y1] = pos[e.a], [x2, y2] = pos[e.b], dx = x2 - x1, dy = y2 - y1, L = Math.hypot(dx, dy) || 1, ex = x2 - dx / L * 20, ey = y2 - dy / L * 20;
-      return `<g><line x1="${x1}" y1="${y1}" x2="${ex}" y2="${ey}" stroke="var(--soft)" stroke-width="${1 + e.n / maxN * 3}" marker-end="url(#ar)"><title>${esc(e.a)} → ${esc(e.b)}: ${e.n}</title></line>
-        <text x="${(x1 + x2) / 2 + 10}" y="${(y1 + y2) / 2}" text-anchor="start">${e.n}×</text></g>`; }).join('')}
-    ${names.map(n => { const [x, y] = pos[n], ly = y < cy ? y - 24 : y + 32;
-      return `<g><circle cx="${x}" cy="${y}" r="16" fill="var(--card)" stroke="var(--accent)" stroke-width="2"/><text x="${x}" y="${ly}" text-anchor="middle">${esc(n)}</text></g>`; }).join('')}
-  </svg>`;
+// ---- Who talks to whom: a small force layout in plain SVG (no library) ----
+// Node colours are each philosopher's Cloth in art/portraits.go, as [day, dusk] from the Palette in art/palette.go.
+const CL = { blue:['#1d4e89', '#26406e'], red:['#a63d33', '#7a2e38'], terracotta:['#b5523b', '#8f4440'], olive:['#6b8a3a', '#40593e'], marble:['#fbfaf6', '#d4d9e8'],
+  shade:['#cdd5df', '#8e97b4'], stone:['#b9b4a8', '#6f7088'], sand:['#eadcb5', '#a69c86'], ink:['#3d4f6b', '#2a3550'] };
+const CG_COLOR = { solon:CL.blue, herodotus:CL.terracotta, thales:CL.blue, anaximander:CL.olive, eratosthenes:CL.sand, aristotle:CL.red, plato:CL.blue, archimedes:CL.terracotta,
+  hero:CL.blue, euclid:CL.olive, pythagoras:CL.marble, socrates:CL.shade, diogenes:CL.stone, zeno:CL.blue, heraclitus:CL.red, protagoras:CL.red, isocrates:CL.marble,
+  xenophon:CL.blue, homer:CL.marble, solomun:CL.ink, you:['#c49a2c', '#9c7d3a'], oracle:['#3d8fd8', '#4a3f7a'] };   // you = bronze, oracle = sky-high
+const cgColor = (id, dark) => CG_COLOR[id]?.[dark ? 1 : 0] || 'var(--accent)';
+const CG_KIND = { handoff:{ label:'handoff', color:'var(--bar)' }, check:{ label:'check failure sent back', color:'var(--fail)' }, you:{ label:'your message', color:'var(--gold)' } };
+// one edge per (from, to, kind), with the messages behind its count
+function graphData(m) {
+  const groups = new Map();
+  const add = (a, b, kind, msg, n = 1) => { const k = a + '>' + b + '>' + kind; let g = groups.get(k);
+    if (!g) groups.set(k, g = { id:k, a, b, kind, n:0, msgs:[], idx:0 }); g.n += n; if (msg) g.msgs.push(msg); };
+  // counts come from the uncapped edges; the (capped) messages are only attached as detail
+  const kindOf = a => a === 'oracle' ? 'check' : a === 'you' ? 'you' : 'handoff';
+  Object.entries(m.edges || {}).forEach(([k, n]) => { const [a, b] = k.split('>'); add(a, b, kindOf(a), null, n); });
+  (m.messages || []).forEach(x => { const g = groups.get(x.from + '>' + x.to + '>' + kindOf(x.from)); if (g) g.msgs.push(x); });
+  const seen = {};
+  return [...groups.values()].map(g => { const p = g.a + '>' + g.b; g.idx = seen[p] = (seen[p] ?? -1) + 1; return g; });
+}
+function graph(m) {
+  if (!graphData(m).length) return '<p class="empty">No messages or handoffs yet.</p>';
+  return `<div class="cg" data-cg>
+    <div class="cgbar"><button data-a="in" aria-label="Zoom in">+</button><button data-a="out" aria-label="Zoom out">−</button><button data-a="fit">Fit</button><button data-a="reset">Re-layout</button></div>
+    <svg viewBox="0 0 800 500" tabindex="0" role="group" aria-label="Who talks to whom. Tab to an agent or a line. Enter selects, arrow keys move an agent, plus and minus zoom, 0 fits, Escape clears.">
+      <defs>${Object.entries(CG_KIND).map(([k, v]) => `<marker id="cg-ar-${k}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="${v.color}"/></marker>`).join('')}</defs>
+      <rect class="bg" width="800" height="500" fill="transparent"/>
+      <g class="vp"><g class="es"></g><g class="ns"></g></g>
+    </svg>
+    <div class="cglegend">${Object.values(CG_KIND).map(v => `<span><i style="background:${v.color}"></i>${v.label}</span>`).join('')}<span>Line width shows how often. Each direction has its own curve.</span></div>
+    <div class="cgpanel" aria-live="polite"></div>
+  </div>`;
+}
+function initGraph(m) {
+  const root = main.querySelector('[data-cg]'); if (!root) return;
+  const edges = graphData(m), svg = root.querySelector('svg'), vp = svg.querySelector('.vp'), panel = root.querySelector('.cgpanel');
+  const W = 800, H = 500, NS = 'http://www.w3.org/2000/svg';
+  const el = (name, attrs, parent) => { const e = document.createElementNS(NS, name); for (const k in attrs) e.setAttribute(k, attrs[k]); parent?.appendChild(e); return e; };
+  const theme = document.documentElement.dataset.theme, dark = theme === 'dark' || (theme !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
+  const nodes = [...new Set(edges.flatMap(e => [e.a, e.b]))].sort().map(id => ({ id, r:16, w:Math.max(34, id.length * 6.4 + 10), x:0, y:0, vx:0, vy:0 }));
+  const byId = Object.fromEntries(nodes.map(n => [n.id, n]));
+  const maxN = Math.max(...edges.map(e => e.n));
+
+  // ----- layout: repulsion + springs + centring, then push apart any boxes (circle + label) that still overlap -----
+  const tick = alpha => {
+    for (let i = 0; i < nodes.length; i++) for (let j = i + 1; j < nodes.length; j++) {
+      const a = nodes[i], b = nodes[j], dx = b.x - a.x, dy = b.y - a.y, d2 = dx * dx + dy * dy || 1, d = Math.sqrt(d2), f = 9000 / d2 * alpha;
+      a.vx -= dx / d * f; a.vy -= dy / d * f; b.vx += dx / d * f; b.vy += dy / d * f;
+    }
+    for (const e of edges) { const a = byId[e.a], b = byId[e.b], dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy) || 1, f = (d - 170) * 0.02 * alpha;
+      a.vx += dx / d * f; a.vy += dy / d * f; b.vx -= dx / d * f; b.vy -= dy / d * f; }
+    for (const n of nodes) { if (n.pinned) continue; n.vx += (W / 2 - n.x) * 0.01 * alpha; n.vy += (H / 2 - n.y) * 0.01 * alpha; n.vx *= 0.6; n.vy *= 0.6; n.x += n.vx; n.y += n.vy; }
+  };
+  const separate = () => {
+    for (let i = 0; i < nodes.length; i++) for (let j = i + 1; j < nodes.length; j++) {
+      const a = nodes[i], b = nodes[j], dx = b.x - a.x, dy = b.y - a.y, h = 2 * a.r + 22;
+      const ox = (a.w + b.w) / 2 + 12 - Math.abs(dx), oy = h + 8 - Math.abs(dy);
+      if (ox <= 0 || oy <= 0) continue;
+      if (ox < oy) { const s = (dx || (i - j)) < 0 ? -1 : 1; if (!a.pinned) a.x -= s * ox / 2; if (!b.pinned) b.x += s * ox / 2; }
+      else { const s = (dy || (i - j)) < 0 ? -1 : 1; if (!a.pinned) a.y -= s * oy / 2; if (!b.pinned) b.y += s * oy / 2; }
+    }
+  };
+  const layout = () => {
+    nodes.forEach((n, i) => { const t = i / nodes.length * Math.PI * 2 - Math.PI / 2; n.x = W / 2 + Math.cos(t) * 220; n.y = H / 2 + Math.sin(t) * 160; n.vx = n.vy = 0; n.pinned = false; });
+    for (let i = 0; i < 400; i++) tick(1 - i / 400);
+    for (let i = 0; i < 60; i++) separate();
+  };
+
+  // ----- elements -----
+  const es = vp.querySelector('.es'), ns = vp.querySelector('.ns');
+  edges.forEach(e => {
+    e.g = el('g', { class:'ed', tabindex:0, role:'button', 'aria-label':`${e.a} to ${e.b}: ${e.n} ${CG_KIND[e.kind].label}. Enter lists the messages.` }, es);
+    el('title', {}, e.g).textContent = `${e.a} → ${e.b}: ${e.n} × ${CG_KIND[e.kind].label}`;
+    e.vis = el('path', { class:'vis', fill:'none', stroke:CG_KIND[e.kind].color, 'stroke-width':(1.5 + 3 * e.n / maxN).toFixed(2), 'marker-end':`url(#cg-ar-${e.kind})` }, e.g);
+    e.hit = el('path', { fill:'none', stroke:'transparent', 'stroke-width':14 }, e.g);
+    e.txt = el('text', { class:'h', 'text-anchor':'middle' }, e.g); e.txt.textContent = e.n + '×';
+  });
+  nodes.forEach(n => {
+    n.g = el('g', { class:'nd', tabindex:0, role:'button', 'aria-label':`${n.id}. Enter shows its totals; arrow keys move it.` }, ns);
+    el('circle', { r:n.r, fill:cgColor(n.id, dark), stroke:'var(--fg)', 'stroke-width':2 }, n.g);
+    if (n.id !== 'you' && n.id !== 'oracle') { const im = el('image', { href:`/assets/token/${encodeURIComponent(n.id)}.idle${dark ? '.dusk' : ''}.png`, x:-12, y:-12, width:24, height:24, style:'image-rendering:pixelated', 'pointer-events':'none' }, n.g); im.addEventListener('error', () => im.remove()); }
+    const t = el('text', { class:'h', y:n.r + 14, 'text-anchor':'middle' }, n.g); t.textContent = n.id;
+  });
+  const draw = () => {
+    for (const n of nodes) n.g.setAttribute('transform', `translate(${n.x.toFixed(1)} ${n.y.toFixed(1)})`);
+    for (const e of edges) {
+      const A = byId[e.a], B = byId[e.b], dx = B.x - A.x, dy = B.y - A.y, L = Math.hypot(dx, dy) || 1, mo = 26 + 22 * e.idx;
+      const cx = (A.x + B.x) / 2 - dy / L * mo * 2, cy = (A.y + B.y) / 2 + dx / L * mo * 2;
+      let ux = cx - A.x, uy = cy - A.y, ul = Math.hypot(ux, uy) || 1; const sx = A.x + ux / ul * (A.r + 2), sy = A.y + uy / ul * (A.r + 2);
+      ux = B.x - cx; uy = B.y - cy; ul = Math.hypot(ux, uy) || 1; const ex = B.x - ux / ul * (B.r + 4), ey = B.y - uy / ul * (B.r + 4);
+      const d = `M${sx.toFixed(1)} ${sy.toFixed(1)}Q${cx.toFixed(1)} ${cy.toFixed(1)} ${ex.toFixed(1)} ${ey.toFixed(1)}`;
+      e.vis.setAttribute('d', d); e.hit.setAttribute('d', d);
+      e.txt.setAttribute('x', ((sx + ex) / 4 + cx / 2).toFixed(1)); e.txt.setAttribute('y', (((sy + ey) / 4 + cy / 2) + 4).toFixed(1));
+    }
+  };
+
+  // ----- view: pan and zoom -----
+  const view = { k:1, x:0, y:0 };
+  const applyView = () => vp.setAttribute('transform', `translate(${view.x.toFixed(1)} ${view.y.toFixed(1)}) scale(${view.k.toFixed(3)})`);
+  const toSvg = ev => { const p = svg.createSVGPoint(); p.x = ev.clientX; p.y = ev.clientY; return p.matrixTransform(svg.getScreenCTM().inverse()); };
+  const zoomAt = (f, px, py) => { const k = Math.min(4, Math.max(0.25, view.k * f)); view.x = px - (px - view.x) * k / view.k; view.y = py - (py - view.y) * k / view.k; view.k = k; applyView(); };
+  const fit = () => {
+    const x0 = Math.min(...nodes.map(n => n.x - n.w / 2)), x1 = Math.max(...nodes.map(n => n.x + n.w / 2)), y0 = Math.min(...nodes.map(n => n.y - n.r - 4)), y1 = Math.max(...nodes.map(n => n.y + n.r + 22));
+    const k = Math.min(1.6, (W - 60) / (x1 - x0 || 1), (H - 60) / (y1 - y0 || 1));
+    view.k = k; view.x = (W - (x1 - x0) * k) / 2 - x0 * k; view.y = (H - (y1 - y0) * k) / 2 - y0 * k; applyView();
+  };
+
+  // ----- selection and details -----
+  let sel = null, hover = null, shown = '';
+  const stats = id => { const s = { sent:0, got:0, hand:0, chk:0, you:0 };
+    for (const e of edges) { if (e.a === id) { s.sent += e.n; if (e.kind === 'handoff') s.hand += e.n; } if (e.b === id) s.got += e.n; if (e.a === id || e.b === id) { if (e.kind === 'check') s.chk += e.n; if (e.kind === 'you') s.you += e.n; } }
+    return s; };
+  const HINT = 'Hover or click an agent to see its totals. Click a line to list its messages. Drag agents, drag the background to pan, scroll to zoom. Keyboard: Tab to an agent, Enter to pin it, arrows move it; with the graph focused, + and − zoom, arrows pan, 0 fits, Esc clears.';
+  const refresh = () => {
+    const cur = hover || sel, litE = new Set(), litN = new Set();
+    if (cur?.t === 'n') { edges.forEach(e => { if (e.a === cur.id || e.b === cur.id) { litE.add(e.id); litN.add(e.a); litN.add(e.b); } }); }
+    else if (cur) { const e = edges.find(x => x.id === cur.id); litE.add(e.id); litN.add(e.a); litN.add(e.b); }
+    edges.forEach(e => { e.g.classList.toggle('dim', !!cur && !litE.has(e.id)); e.g.classList.toggle('sel', sel?.t === 'e' && sel.id === e.id); });
+    nodes.forEach(n => { n.g.classList.toggle('dim', !!cur && !litN.has(n.id)); n.g.classList.toggle('sel', sel?.t === 'n' && sel.id === n.id); });
+    const key = cur ? cur.t + cur.id : '';
+    if (key === shown) return; shown = key;
+    if (!cur) { panel.innerHTML = `<p class="empty">${HINT}</p>`; return; }
+    if (cur.t === 'n') { const s = stats(cur.id);
+      panel.innerHTML = `<h3><span class="dot" style="background:${cgColor(cur.id, dark)}"></span>${esc(cur.id)}${sel?.t === 'n' && sel.id === cur.id ? ' <span class="tag">pinned</span>' : ''}</h3>
+        <div class="cgstats"><span><b>${s.sent}</b> sent</span><span><b>${s.got}</b> received</span><span><b>${s.hand}</b> handoffs</span><span><b>${s.chk}</b> check failures sent back</span><span><b>${s.you}</b> your messages</span></div>`; return; }
+    const e = edges.find(x => x.id === cur.id), more = e.n - e.msgs.length;
+    panel.innerHTML = `<h3>${esc(e.a)} → ${esc(e.b)} <span class="tag">${e.n} × ${CG_KIND[e.kind].label}</span></h3>` + (e.msgs.length
+      ? `<ul class="cgmsgs">${e.msgs.map(x => `<li><span class="mono">${esc(new Date(x.time).toLocaleString())}</span> <span class="tag">${esc(x.job)}</span> ${esc(x.text)}</li>`).join('')}</ul>${more > 0 ? `<p class="empty">${more} older not listed.</p>` : ''}`
+      : '<p class="empty">No message details were recorded for this line.</p>');
+  };
+  const pick = t => { sel = sel && sel.t === t.t && sel.id === t.id ? null : t; refresh(); };
+
+  // ----- events -----
+  let drag = null, pan = null;
+  nodes.forEach(n => {
+    const g = n.g, t = { t:'n', id:n.id };
+    g.addEventListener('pointerenter', () => { hover = t; refresh(); });
+    g.addEventListener('pointerleave', () => { if (hover === t) { hover = null; refresh(); } });
+    g.addEventListener('focus', () => { hover = t; refresh(); });
+    g.addEventListener('blur', () => { if (hover === t) { hover = null; refresh(); } });
+    g.addEventListener('pointerdown', ev => { if (ev.button) return; ev.stopPropagation(); const p = toSvg(ev);
+      drag = { n, sx:ev.clientX, sy:ev.clientY, moved:false, ox:(p.x - view.x) / view.k - n.x, oy:(p.y - view.y) / view.k - n.y }; g.setPointerCapture(ev.pointerId); });
+    g.addEventListener('pointermove', ev => { if (!drag || drag.n !== n) return;
+      if (!drag.moved && Math.hypot(ev.clientX - drag.sx, ev.clientY - drag.sy) < 4) return; drag.moved = true;
+      const p = toSvg(ev); n.x = (p.x - view.x) / view.k - drag.ox; n.y = (p.y - view.y) / view.k - drag.oy; n.pinned = true; draw(); });
+    g.addEventListener('pointerup', () => { if (drag?.n === n && !drag.moved) pick(t); drag = null; });
+    g.addEventListener('pointercancel', () => { drag = null; });
+  });
+  edges.forEach(e => {
+    const t = { t:'e', id:e.id };
+    e.g.addEventListener('pointerenter', () => { hover = t; refresh(); });
+    e.g.addEventListener('pointerleave', () => { if (hover === t) { hover = null; refresh(); } });
+    e.g.addEventListener('focus', () => { hover = t; refresh(); });
+    e.g.addEventListener('blur', () => { if (hover === t) { hover = null; refresh(); } });
+    e.g.addEventListener('click', () => pick(t));
+  });
+  svg.addEventListener('pointerdown', ev => { if (ev.button || ev.target.closest('.nd, .ed')) return;
+    pan = { cx:ev.clientX, cy:ev.clientY, vx:view.x, vy:view.y, moved:false }; svg.setPointerCapture(ev.pointerId); });
+  svg.addEventListener('pointermove', ev => { if (!pan) return; const s = svg.getScreenCTM().a || 1, dx = ev.clientX - pan.cx, dy = ev.clientY - pan.cy;
+    if (Math.hypot(dx, dy) > 3) pan.moved = true; view.x = pan.vx + dx / s; view.y = pan.vy + dy / s; applyView(); });
+  svg.addEventListener('pointerup', () => { if (pan && !pan.moved && sel) { sel = null; refresh(); } pan = null; });
+  svg.addEventListener('wheel', ev => { ev.preventDefault(); const p = toSvg(ev); zoomAt(Math.exp(-ev.deltaY * 0.0015), p.x, p.y); }, { passive:false });
+  svg.addEventListener('keydown', ev => {
+    const node = ev.target.closest?.('.nd') && nodes.find(n => n.g === ev.target.closest('.nd')), edge = ev.target.closest?.('.ed') && edges.find(e => e.g === ev.target.closest('.ed'));
+    const arrows = { ArrowLeft:[-1, 0], ArrowRight:[1, 0], ArrowUp:[0, -1], ArrowDown:[0, 1] }[ev.key];
+    if (ev.key === 'Escape') { sel = null; refresh(); }
+    else if ((ev.key === 'Enter' || ev.key === ' ') && (node || edge)) pick(node ? { t:'n', id:node.id } : { t:'e', id:edge.id });
+    else if (arrows && node) { const st = ev.shiftKey ? 40 : 10; node.x += arrows[0] * st; node.y += arrows[1] * st; node.pinned = true; draw(); }
+    else if (arrows) { view.x -= arrows[0] * 40; view.y -= arrows[1] * 40; applyView(); }
+    else if (ev.key === '+' || ev.key === '=') zoomAt(1.2, W / 2, H / 2);
+    else if (ev.key === '-' || ev.key === '_') zoomAt(1 / 1.2, W / 2, H / 2);
+    else if (ev.key === '0') fit();
+    else return;
+    ev.preventDefault();
+  });
+  root.querySelector('.cgbar').addEventListener('click', ev => { const a = ev.target.dataset?.a;
+    if (a === 'in') zoomAt(1.25, W / 2, H / 2); else if (a === 'out') zoomAt(0.8, W / 2, H / 2); else if (a === 'fit') fit(); else if (a === 'reset') { layout(); draw(); fit(); } });
+
+  layout(); draw(); fit(); refresh();
 }
 async function metrics() {
   const m = await api('/api/admin/metrics');
@@ -283,13 +466,14 @@ async function metrics() {
     <div class="card"><h2>Time per phase</h2><p class="help">Seconds spent in each state, all jobs together.</p>${bars(Object.entries(m.phase_seconds).map(([k, v]) => ({ k, v, tip:`${v.toFixed(1)} s` })).sort((a, b) => b.v - a.v), v => v.toFixed(1) + ' s')}</div>
     <div class="card"><h2>Tool calls</h2>${bars(Object.entries(m.tools).map(([k, v]) => ({ k, v })).sort((a, b) => b.v - a.v), v => fmt(v))}</div>
   </div>
-  <div class="card"><h2>Who talks to whom</h2><p class="help">Handoffs, check failures sent back, and your messages. Line width shows how often.</p>${graph(m.edges)}</div>
+  <div class="card"><h2>Who talks to whom</h2><p class="help">Handoffs, check failures sent back, and your messages. Line width shows how often.</p>${graph(m)}</div>
   <div class="card"><h2>Checks</h2>${Object.keys(m.checks).length ? `<table><tr><th>Command</th><th class="n">Passed</th><th class="n">Failed</th></tr>
     ${Object.entries(m.checks).map(([c, x]) => `<tr><td class="mono">${esc(c)}</td><td class="n">${x.Passed}</td><td class="n">${x.Failed ? `<span class="pill bad">${x.Failed}</span>` : 0}</td></tr>`).join('')}</table>` : '<p class="empty">No checks run yet.</p>'}</div>
   <div class="card"><h2>Jobs</h2>${m.jobs?.length ? `<table><tr><th>Job</th><th>Title</th><th>State</th><th class="n">Cost</th><th class="n">Time</th><th class="n">Requests</th><th class="n">Heal loops</th><th class="n">Handoffs</th></tr>
     ${m.jobs.map(j => `<tr><td class="mono">${esc(j.id)}</td><td>${esc(j.title)}</td><td><span class="pill ${j.state === 'done' ? 'ok' : j.state === 'failed' ? 'bad' : 'warn'}">${esc(j.state)}</span></td>
       <td class="n">${usd(j.usd)}</td><td class="n">${j.seconds.toFixed(0)} s</td><td class="n">${j.requests}</td><td class="n">${j.loops}</td>
       <td class="n">${j.handoffs.Written} written${j.handoffs.Missing ? `, ${j.handoffs.Missing} missing` : ''}${j.handoffs.Rejected ? `, ${j.handoffs.Rejected} rejected` : ''}</td></tr>`).join('')}</table>` : '<p class="empty">No jobs yet.</p>'}</div>`;
+  initGraph(m);
   // hover details on bars
   const tip = $('#tip');
   main.querySelectorAll('.bar[data-tip]').forEach(b => {
