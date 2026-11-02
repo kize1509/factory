@@ -70,7 +70,9 @@ type Job struct {
 	verdict   *Verdict
 	asked     int // questions the reviewer asked this round
 	ctx       context.Context
-	Question  string `json:"question,omitempty"`
+	Question  string          `json:"question,omitempty"`
+	Ask       string          `json:"ask,omitempty"` // a stuck job's agent, in its own words: what it needs from you
+	asks      map[string]*Ask // requests agents made with ask_human, by agent
 
 	rts           map[string]runtime.Runtime // every runtime, to pick one per role
 	lead          string                     // the builder whose work goes forward
@@ -328,14 +330,14 @@ func (j *Job) Run(parent context.Context) {
 		j.mu.Lock()
 		phase := j.State
 		j.mu.Unlock()
-		j.stuck(phase, err, work)
+		j.stuck(phase, err, work, j.plea(ctx, err))
 		select {
 		case g := <-j.guide:
 			r := j.loadResume()
 			j.mu.Lock()
 			j.guidance = append(j.guidance, g)
 			r.Guidance = j.guidance
-			j.resume, j.Error, j.Phase = r, "", ""
+			j.resume, j.Error, j.Phase, j.Ask = r, "", "", ""
 			j.mu.Unlock()
 		case <-ctx.Done():
 		}
@@ -743,26 +745,14 @@ func (j *Job) requireHandoff(ctx context.Context, agent string, a runtime.Agent)
 		j.mu.Unlock()
 		if n != nil {
 			if len(n.OpenQuestions) > 0 {
-				// open questions stop the job until you answer them (D38)
-				q := strings.Join(n.OpenQuestions, " ")
+				// real blockers are asked with ask_human while the agent works; what's
+				// left at the end goes on to the reviewer instead of stopping the job
 				j.mu.Lock()
-				j.Question = q
-				j.mu.Unlock()
-				j.emit(agent, "handoff.blocked", map[string]any{"open_questions": n.OpenQuestions})
-				j.set("waiting")
-				var answer string
-				select {
-				case answer = <-j.answers:
-				case <-ctx.Done():
-					return ctx.Err()
+				for _, q := range n.OpenQuestions {
+					n.Findings = append(n.Findings, "Open question: "+q)
 				}
-				j.mu.Lock()
-				j.Question = ""
-				n.Findings = append(n.Findings, "Answer from you: "+answer)
 				n.OpenQuestions = nil
 				j.mu.Unlock()
-				j.emit(agent, "handoff.answered", map[string]any{"answer": answer})
-				j.set("handoff")
 			}
 			return nil
 		}
@@ -826,7 +816,28 @@ func quoted(xs []string) []string {
 
 // ask sends one turn to an agent and retries, twice at most, when the
 // connection to the model breaks off: a passing glitch shouldn't end a job.
+// ask gives an agent a turn. When the agent asked you for help during it,
+// the job waits for your answer and hands it over as the next turn.
 func (j *Job) ask(ctx context.Context, a runtime.Agent, text string) (string, error) {
+	for {
+		out, err := j.prompt(ctx, a, text)
+		if err != nil {
+			return out, err
+		}
+		agent, q := j.takeAsk(a)
+		if q == nil {
+			return out, nil
+		}
+		answer, err := j.waitForYou(ctx, agent, q)
+		if err != nil {
+			return "", err
+		}
+		text = "You asked the person running the factory: " + q.Need + "\n\nThey answer:\n\n" + answer + "\n\nCarry on with your task."
+	}
+}
+
+// prompt runs one turn, retrying when the connection to the model breaks.
+func (j *Job) prompt(ctx context.Context, a runtime.Agent, text string) (string, error) {
 	for try := 0; ; try++ {
 		out, err := a.Prompt(ctx, text)
 		if err == nil || try >= 2 || ctx.Err() != nil || !transient(err) {

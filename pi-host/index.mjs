@@ -35,7 +35,7 @@ function factoryTools(req) {
       label: "Handoff",
       description:
         "Write the handoff note for whoever works on this next. Required at the end of your phase. " +
-        "Fields: from, to, did, decisions, findings, files (repo paths that exist), open_questions, next, evidence (optional: paths in your scratch folder or the repo).",
+        "Fields: from, to, did, decisions, findings, files (repo paths that exist), open_questions (leave empty: ask for what you need with ask_human while you work), next, evidence (optional: paths in your scratch folder or the repo).",
       parameters: Type.Object({
         from: Type.String(),
         to: Type.String(),
@@ -57,6 +57,13 @@ function factoryTools(req) {
         "Use the project's existing tests and tools. The engine runs them after you finish and decides whether the work passes.",
       parameters: Type.Object({ commands: Type.Array(Type.String()), why: Type.Optional(Type.String()) }),
       execute: (_id, params) => call("set_checks", params),
+    }),
+    defineTool({
+      name: "ask_human",
+      label: "Ask you",
+      description: "Ask the person running the factory for something only they can give, the moment you need it: credentials, an API key or token, access, an account, a URL, or a decision the ticket doesn't make. Also when you're stuck on the same problem after two tries. need: one sentence that starts with what you need, e.g. \"I need the Stripe test API key\" or \"I'm stuck on the failing login check: should I mock the clock or raise the timeout?\". why: one or two sentences on what you tried and why you can't go on. options: the choices, when it's a decision. Then end your turn; the answer comes as your next message.",
+      parameters: Type.Object({ need: Type.String(), why: Type.Optional(Type.String()), options: Type.Optional(Type.Array(Type.String())) }),
+      execute: (_id, params) => call("ask_human", params),
     }),
     defineTool({
       name: "ask_builder",
@@ -150,7 +157,7 @@ async function start(req) {
     model,
     thinkingLevel: req.thinking || "medium",
     tools: [...(req.tools || ["read", "bash", "edit", "write", "grep", "find", "ls"]), "handoff", "set_checks", "set_status",
-      ...(req.role === "reviewer" ? ["ask_builder", "verdict", "grade"] : []),
+      ...(req.role === "reviewer" ? ["ask_builder", "verdict", "grade"] : ["ask_human"]),
       ...(req.role === "builder" || req.role === "planner" ? ["propose_experiments"] : []),
       ...(req.role === "planner" ? ["name_job"] : [])],
     customTools: factoryTools(req),

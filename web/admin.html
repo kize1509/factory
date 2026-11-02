@@ -202,7 +202,7 @@ async function jobs() {
             <span>runtime <b>${esc(j.runtime || 'pi')} · ${esc((j.model || '').split('/').pop())}</b></span><span>heal loops <b>${s.loops || 0}</b></span>
             <span>repo <b class="mono">${esc(j.repo)}</b></span>${j.branch ? `<span>branch <b class="mono">${esc(j.branch)}</b></span>` : ''}${j.commit ? `<span>commit <b class="mono">${esc(j.commit)}</b></span>` : ''}${/^https:\/\//.test(j.pr || '') ? `<span>pull request <a class="mono" href="${esc(j.pr)}" target="_blank" rel="noopener">${esc(j.pr.replace(/^https:\/\/github\.com\//, ''))}</a></span>` : ''}</div>
           ${st === 'waiting' ? `<div class="q"><b>Question:</b><div data-md="q"></div></div><form class="acts answer"><input type="text" name="a" placeholder="Your answer" required style="flex:1;min-width:220px"><button class="primary">Send answer</button></form>` : ''}
-          ${['failed', 'stuck', 'interrupted'].includes(st) && j.error ? `<div class="e">${st === 'stuck' && j.phase ? `Stuck at ${esc(j.phase)}:` : ''}<div data-md="e"></div></div>` : ''}
+          ${st === 'stuck' && j.ask ? `<div class="q"><b>The agent says:</b><div data-md="ask"></div></div>` : ''}${['failed', 'stuck', 'interrupted'].includes(st) && j.error ? `<div class="e">${st === 'stuck' && j.phase ? `Stuck at ${esc(j.phase)}:` : ''}<div data-md="e"></div></div>` : ''}
           ${['failed', 'stuck', 'interrupted'].includes(st) ? `<details class="brief" data-brief><summary>Where it stopped: everything the agent knows</summary><pre>Loading…</pre></details>
             <form class="acts guide"><textarea name="a" rows="2" placeholder="Your guidance: what to do next, what went wrong, where to look" required style="flex:1;min-width:260px"></textarea><button class="primary">Carry on</button></form>` : ''}
           <div class="acts">${EMBED ? '<button data-map>Show on the map</button>' : ''}${!['done', 'cancelled'].includes(st) ? '<button data-stop>Stop job</button>' : ''}<span class="msg"></span></div>
@@ -214,6 +214,7 @@ async function jobs() {
       const id = el.dataset.id, msg = el.querySelector('.msg'), src = list.find(x => x.id === id) || {};
       el.querySelector('[data-md="q"]')?.appendChild(Md.render(src.question || ''));
       el.querySelector('[data-md="e"]')?.appendChild(Md.code(src.error || ''));
+      el.querySelector('[data-md="ask"]')?.appendChild(Md.render(src.ask || ''));
       el.querySelector('[data-map]')?.addEventListener('click', () => parent.postMessage({ openJob:id }, location.origin));
       el.querySelector('[data-stop]')?.addEventListener('click', async () => { if (!confirm(`Stop ${id} for good? Its agents stop now; the work so far stays on its branch.`)) return;
         try { await api(`/api/jobs/${encodeURIComponent(id)}/cancel`, { method:'POST' }); msg.className = 'msg ok'; msg.textContent = 'Stopped.'; draw(); } catch (err) { msg.className = 'msg err'; msg.textContent = err.message; } });

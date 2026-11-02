@@ -42,6 +42,8 @@
   #m-guide .brief { max-height:40vh; overflow:auto; white-space:pre-wrap; font:12px/1.5 'JetBrains Mono', monospace; background:var(--bg); border:1px solid var(--line); border-radius:4px; padding:10px 12px; margin:0 }
   #m-guide .why { color:var(--fail); font-size:13px; max-height:35vh; overflow:auto }
   #m-guide .why .md { color:inherit }
+  #m-guide .why.plea { color:var(--fg); font-size:14px } #m-guide .why.plea > b { color:var(--fail) }
+  #m-guide .why details { margin-top:8px; color:var(--soft) } #m-guide .why details summary { cursor:pointer; font:11px Silkscreen, monospace }
   #m-guide .why .md .code pre, #m-guide .why .md .code pre code { white-space:pre-wrap; overflow-wrap:anywhere }
   .modal.wide .box { width:min(1240px, 100%); height:min(90vh, 1000px); max-height:none }
   .modal .mh { display:flex; align-items:center; gap:10px; padding:12px 16px; border-bottom:2px solid var(--line) }
@@ -1477,8 +1479,9 @@ function onEvent(j, e) {
   switch (e.type) {
     case 'job.started': j.title = d.title || j.title; if (d.project) PROJECTS[j.repo] = d.project; hud(); say(`${d.issue || j.id} arrived at the Gates of ${j.city}: ${d.title}. The checks for this job: ${(d.checks || []).map(code).join(', ') || 'none picked'}.`); break;
     case 'job.state': L.state = d.state; if (d.state === 'building') L.oracle = L.oracle === 'fail' ? 'fail' : null;
-      if (d.state === 'waiting') { L.msg = 'Needs you: ' + (L.question || 'click me to answer'); say(`${j.city} waits for you. Archimedes asks: ${L.question}. Click him and reply.`);
-        if (!old) alarm(j, 'waiting', L.question || 'Archimedes has a question.'); }
+      if (d.state === 'waiting') { const need = L.need || Md.oneLine(L.question || '', 160), name = who[L.asker]?.Name || 'Archimedes';
+        L.msg = 'Needs you: ' + (need || 'click me to answer'); say(`${j.city} waits for you. ${name}: ${need}`);
+        if (!old) alarm(j, 'waiting', need || `${name} has a question.`); }
       if (d.state !== 'stuck' && d.state !== 'waiting') clearAlarm(j);
       refresh(j, true); return;
     case 'workspace.ready': L.worktree = d.path; break;
@@ -1528,7 +1531,9 @@ function onEvent(j, e) {
     case 'review.no_verdict': say('Socrates finished without a verdict, so the engine asked him for one.'); break;
     case 'checks.planned': say(`Archimedes read your test notes and named the checks: ${(d.commands || []).map(code).join(', ')}. The Oracle will run them.`); think('Checks I named: ' + (d.commands || []).join('; ')); break;
     case 'checks.none': say(`No checks were named, so ${j.id} will finish without the Oracle. Review it by hand.`); break;
-    case 'handoff.blocked': L.question = (d.open_questions || []).join(' '); break;
+    case 'handoff.blocked': { const qs = d.open_questions || []; L.question = qs.length > 1 ? qs.map(q => '- ' + q).join('\n') : qs[0] || ''; L.need = ''; L.asker = e.agent; break; }
+    case 'agent.asked': L.question = d.question || d.need; L.need = d.need; L.asker = e.agent; think('I asked you: ' + d.need, '', e.agent); break;
+    case 'human.answered': L.question = L.need = ''; L.msg = 'Thanks, carrying on'; say(`You answered ${who[e.agent]?.Name || 'Archimedes'}: "${d.answer}". The job goes on.`); break;
     case 'handoff.answered': L.msg = 'Thanks, carrying on'; say(`You answered Archimedes: "${d.answer}". The job goes on.`); break;
     case 'handoff.missing': L.msg = 'writing my handoff (it was missing)'; say('Archimedes finished without a handoff note, so the engine sent him back to write it.'); break;
     case 'workspace.blocked_write': say(`Archimedes changed test files (${(d.files || []).join(', ')}). The engine undid it: agents don't edit tests.`); break;
@@ -1541,9 +1546,9 @@ function onEvent(j, e) {
     case 'job.cancelled': L.state = 'cancelled'; L.stuck = null; clearAlarm(j);
       say(`You stopped ${j.id}. Its agents went home; the work so far stays on ${code(d.branch || 'its branch')}.`); refresh(j, true); return;
     case 'job.done': L.state = 'done'; say(`${j.id} is done. ${j.city} is quiet again.`, 'ok'); refresh(j, true); return;
-    case 'job.stuck': L.state = 'stuck'; L.stuck = { error:d.error, phase:d.phase }; L.msg = 'Stuck: click me to guide me on';
-      say(`${j.id} is stuck at ${d.phase || 'work'}: ${d.error}. Nothing is lost: it waits for your guidance, then carries on.`, 'fail');
-      if (!old) alarm(j, 'stuck', d.error); refresh(j, true); return;
+    case 'job.stuck': L.state = 'stuck'; L.stuck = { error:d.error, phase:d.phase, ask:d.ask }; L.msg = 'Stuck: click me to guide me on';
+      say(d.ask ? `${j.id} is stuck at ${d.phase || 'work'}. ${who[e.agent]?.Name || 'Archimedes'}: ${Md.oneLine(d.ask, 300)}` : `${j.id} is stuck at ${d.phase || 'work'}: ${Md.oneLine(d.error, 300)}. It waits for your guidance, then carries on.`, 'fail');
+      if (!old) alarm(j, 'stuck', d.ask || d.error); refresh(j, true); return;
     case 'job.resumed': L.stuck = null; L.msg = 'Carrying on with your guidance'; clearAlarm(j);
       say(`${who[d.lead]?.Name || 'Archimedes'} carries ${j.id} on with your guidance: "${d.guidance}"`); refresh(j, true); return;
     case 'human.guidance': say(`You guided ${j.id}: "${d.text}"`); break;
@@ -1562,7 +1567,7 @@ function openStream() {
   liveStream = new EventSource('/api/events?all=1');
   // once the history is in, the jobs that were already waiting on you get their bars, quietly
   liveStream.addEventListener('replayed', () => { for (const j of JOBS) if (j.live?.state === 'stuck' || j.live?.state === 'waiting')
-    alarm(j, j.live.state, j.live.state === 'stuck' ? j.live.stuck?.error : j.live.question, true); });
+    alarm(j, j.live.state, j.live.state === 'stuck' ? j.live.stuck?.ask || j.live.stuck?.error : j.live.need || j.live.question, true); });
   liveStream.onmessage = m => {
     try {
       const e = JSON.parse(m.data); if (!e.job) return;
@@ -1608,7 +1613,7 @@ function addLiveJob(info) {
     JOBS.push(j);
   }
   j.live = { state:info.state || 'starting', msg:'', oracle:null };
-  if (info.state === 'stuck') j.live.stuck = { error:info.error, phase:info.phase };
+  if (info.state === 'stuck') j.live.stuck = { error:info.error, phase:info.phase, ask:info.ask };
   if (info.state === 'waiting') j.live.question = info.question;
   j.chron = [];
   refresh(j, true);
@@ -1684,13 +1689,19 @@ async function openGuide(j) {
   document.getElementById('m-guide-s').textContent = `${j.id} · ${j.title}`;
   const STEP = { starting:'the start', planning:'planning', symposium:'the Symposium', grading:'grading', building:'building', checking:'the checks', handoff:'the handoff', reviewing:'review', committing:'the commit', shipping:'shipping' };
   const why = document.getElementById('gd-why');
+  why.classList.toggle('plea', ask || !!L.stuck?.ask);
   if (ask) why.replaceChildren(Md.render(L.question || ''));
-  else { // the error is raw tool output, so it goes in a code block as it is
-    const h = document.createElement('b'); h.textContent = `Stuck at ${STEP[L.stuck?.phase] || L.stuck?.phase || 'work'}:`;
-    why.replaceChildren(h, ...(L.stuck?.error ? [Md.code(L.stuck.error)] : []));
+  else { // the agent's request first; the error is raw tool output, so it goes in a code block as it is
+    const h = document.createElement('b'); h.textContent = `Stuck at ${STEP[L.stuck?.phase] || L.stuck?.phase || 'work'}${L.stuck?.ask ? '. ' + (who[L.lead || BUILDER]?.Name || 'Archimedes') + ' says:' : ':'}`;
+    if (L.stuck?.ask) {
+      const err = document.createElement('details'), sum = document.createElement('summary'); sum.textContent = 'What the engine saw';
+      err.append(sum, ...(L.stuck.error ? [Md.code(L.stuck.error)] : []));
+      why.replaceChildren(h, Md.render(L.stuck.ask), err);
+    } else why.replaceChildren(h, ...(L.stuck?.error ? [Md.code(L.stuck.error)] : []));
   }
   document.getElementById('gd-label').textContent = ask ? 'Your answer' : 'Your guidance';
-  document.getElementById('gd-help').textContent = ask ? 'it goes into the handoff note and the job goes on.' : 'what to do next, what it got wrong, or where to look. The same agent carries on from where it stopped.';
+  document.getElementById('gd-help').textContent = ask ? 'the agent gets it as its next message and carries on.' : 'what to do next, what it got wrong, or where to look. The same agent carries on from where it stopped.';
+  f.text.placeholder = ask ? 'e.g. the key is in 1Password under Weather; read it from OPENWEATHER_API_KEY' : 'e.g. the test fails because the parser trims spaces; keep them. Look at parse.go line 40.';
   document.getElementById('gd-go').textContent = ask ? 'Send answer' : 'Carry on';
   document.getElementById('gd-more').style.display = ask ? 'none' : '';
   document.getElementById('gderr').textContent = ''; f.text.value = '';
@@ -1702,7 +1713,7 @@ document.getElementById('gdf').onsubmit = async e => {
   e.preventDefault(); const j = guideJob, text = e.target.text.value.trim(), err = document.getElementById('gderr'); if (!j || !text) return;
   const ask = j.live?.state === 'waiting';
   err.textContent = 'Sending…';
-  const r = await fetch(ask ? `/api/agents/${encodeURIComponent(j.id)}/${j.live?.lead || BUILDER}/message` : `/api/jobs/${encodeURIComponent(j.id)}/continue`,
+  const r = await fetch(ask ? `/api/agents/${encodeURIComponent(j.id)}/${j.live?.asker || j.live?.lead || BUILDER}/message` : `/api/jobs/${encodeURIComponent(j.id)}/continue`,
     { method:'POST', headers:{ 'content-type':'application/json' }, body:JSON.stringify({ text }) }).catch(x => ({ ok:false, text:async () => x.message }));
   if (!r.ok) { err.textContent = await r.text(); return; }
   closeModal('m-guide'); clearAlarm(j);

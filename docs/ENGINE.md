@@ -161,15 +161,18 @@ flowchart TD
 
 Every job starts with Aristotle. He names it (and, the first time, the project: `name_job`), reads the code and leaves a plan for the builder. On a complex job he may open a Symposium.
 
-A job never fails. When the engine can't get further on its own (the checks keep failing, the handoff stays invalid, review keeps blocking, the commit or push breaks, or you stop it), the job gets **stuck**:
+A job never fails. When the engine can't get further on its own (the checks keep failing, the handoff stays invalid, review keeps blocking, the commit or push breaks), the job gets **stuck**:
 
 - It writes down where it stopped in `.factory/jobs/<job>/resume.md` (and `resume.json`): the task, the step, why, the checks and their last output, the review findings, every handoff note, the files changed so far and your guidance so far.
+- The builder, if it's still there, writes you a few sentences: what it needs from you or what it's stuck on. That comes first in the bar and the guide box; the engine's error is folded below it.
 - It tells you: a bar on the map that stays until you act, a chime, a desktop notification, the count in the tab title and a beacon on the island. Admin → Jobs shows it too.
 - It keeps its agents and worktree and waits.
 
 Your guidance (Guide it on, in the bar, the Admin Jobs tab, or a message to the agent) goes to the same builder, which remembers its work. A job stuck before a restart starts a new builder in the same worktree with the written brief and your guidance. Then the checks, the handoff, review and the commit follow as usual. It can get stuck and be guided on as often as it takes. Old failed or interrupted jobs can be guided on the same way.
 
-Open questions in a handoff note put the job in a "needs you" state. Your reply is added to the note and the job continues.
+Any agent but the reviewer can ask you with `ask_human` the moment it needs something only you can give: a credential, a key, access, a decision the ticket doesn't make, or help after the same thing failed twice. The request is short: `need` (one sentence, "I need …"), `why` (one or two) and optional `options`. The tool returns at once and the agent ends its turn; the job waits in "needs you" (a bar, a chime, a notification). Your answer is the agent's next message, and it carries on. Because the tool never blocks, no runtime's tool timeout gets in the way.
+
+Open questions left in a handoff note don't stop the job any more. They go on to the reviewer as findings.
 
 The review step is described in §8. The other roles (research, planning, humanizer, finalizer, scheduler) come in M1. M0 proves the spine: worktree, Pi, gateway, checks, healing loop, handoff, events.
 

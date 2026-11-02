@@ -29,30 +29,31 @@ import (
 type Resume struct {
 	Phase      string    `json:"phase"` // the state the job was in when it got stuck
 	Error      string    `json:"error"`
-	Lead       string    `json:"lead"`        // the builder whose work goes forward
-	Work       string    `json:"work"`        // that builder's worktree
-	WorkBranch string    `json:"work_branch"` // and its branch
-	Base       string    `json:"base"`        // the commit the job started from
+	Ask        string    `json:"ask,omitempty"` // the agent, to you: what it needs to carry on
+	Lead       string    `json:"lead"`          // the builder whose work goes forward
+	Work       string    `json:"work"`          // that builder's worktree
+	WorkBranch string    `json:"work_branch"`   // and its branch
+	Base       string    `json:"base"`          // the commit the job started from
 	Checks     []string  `json:"checks,omitempty"`
 	Guidance   []string  `json:"guidance,omitempty"` // everything you said so far, oldest first
 	Stuck      time.Time `json:"stuck"`
 }
 
 // stuck records where the job stopped and why, and tells you.
-func (j *Job) stuck(phase string, err error, work *workspace.Worktree) {
+func (j *Job) stuck(phase string, err error, work *workspace.Worktree, ask string) {
 	j.mu.Lock()
-	r := Resume{Phase: phase, Error: err.Error(), Lead: j.lead, Base: j.base, Checks: j.Checks, Guidance: j.guidance, Stuck: time.Now()}
+	r := Resume{Phase: phase, Error: err.Error(), Ask: ask, Lead: j.lead, Base: j.base, Checks: j.Checks, Guidance: j.guidance, Stuck: time.Now()}
 	if work != nil {
 		r.Work, r.WorkBranch = work.Path, work.Branch
 	}
-	j.Error, j.Phase = r.Error, phase
+	j.Error, j.Phase, j.Ask = r.Error, phase, ask
 	j.mu.Unlock()
 	os.MkdirAll(j.Dir(), 0o755)
 	os.WriteFile(filepath.Join(j.Dir(), "resume.json"), mustJSON(r), 0o644)
 	brief := j.brief(&r, work)
 	os.WriteFile(filepath.Join(j.Dir(), "resume.md"), []byte(brief), 0o644)
 	j.set("stuck")
-	j.emit("", "job.stuck", map[string]any{"error": r.Error, "phase": phase, "context": filepath.Join(j.Dir(), "resume.md")})
+	j.emit(j.lead, "job.stuck", map[string]any{"error": r.Error, "phase": phase, "ask": ask, "context": filepath.Join(j.Dir(), "resume.md")})
 }
 
 // Brief is the written context of a stuck job: what you read before you
@@ -82,6 +83,9 @@ func (j *Job) brief(r *Resume, work *workspace.Worktree) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Where %s stopped\n\nTicket %s: %s\n\n## The task\n\n%s\n\n", j.ID, j.ID, j.Title, strings.TrimSpace(j.Prompt))
 	fmt.Fprintf(&b, "## Where it stopped\n\nStep: %s\n\nWhy: %s\n\n", phaseName(r.Phase), r.Error)
+	if r.Ask != "" {
+		fmt.Fprintf(&b, "The agent asked: %s\n\n", r.Ask)
+	}
 	if len(r.Checks) > 0 {
 		fmt.Fprintf(&b, "## Checks\n\nThe engine checks the work with: %s\n\n", strings.Join(quoted(r.Checks), ", "))
 	}
@@ -161,6 +165,15 @@ func phaseName(p string) string {
 	return p
 }
 
+// Restore brings back what a job stuck before a restart said: the step and
+// the agent's request.
+func (j *Job) Restore() {
+	r := j.loadResume()
+	j.mu.Lock()
+	j.Phase, j.Ask = r.Phase, r.Ask
+	j.mu.Unlock()
+}
+
 // Resumable reports whether you can guide this job on.
 func (j *Job) Resumable() bool {
 	j.mu.Lock()
@@ -191,7 +204,7 @@ func (j *Job) Continue(text string) (start bool, err error) {
 	}
 	r := j.loadResume()
 	r.Guidance = append(r.Guidance, text)
-	j.resume, j.guidance, j.Phase = r, r.Guidance, ""
+	j.resume, j.guidance, j.Phase, j.Ask = r, r.Guidance, "", ""
 	return true, nil
 }
 

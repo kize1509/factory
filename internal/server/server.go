@@ -335,16 +335,17 @@ func (s *Server) message(w http.ResponseWriter, r *http.Request) {
 		s.guide(w, j, body.Text)
 		return
 	}
+	if strings.TrimSpace(body.Text) != "" && j.Waiting() && j.Answer(body.Text) { // the job was waiting on you: this is the answer
+		s.Bus.Emit(j.ID, r.PathValue("agent"), "human.message", map[string]any{"text": body.Text})
+		writeJSON(w, map[string]any{"ok": true, "answered": true})
+		return
+	}
 	a := j.Agent(r.PathValue("agent"))
 	if a == nil || strings.TrimSpace(body.Text) == "" {
 		http.Error(w, "no such agent, or empty message", http.StatusBadRequest)
 		return
 	}
 	s.Bus.Emit(j.ID, r.PathValue("agent"), "human.message", map[string]any{"text": body.Text})
-	if j.Waiting() && j.Answer(body.Text) { // the job was waiting on you: this is the answer
-		writeJSON(w, map[string]any{"ok": true, "answered": true})
-		return
-	}
 	if err := a.Steer(body.Text); err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
@@ -429,6 +430,15 @@ func (s *Server) callTool(j *job.Job, agent, tool string, args []byte) (string, 
 			return "", err
 		}
 		return "Checks saved. The engine runs them when you finish: " + strings.Join(body.Commands, "; "), nil
+	case "ask_human":
+		var q job.Ask
+		if err := json.Unmarshal(args, &q); err != nil {
+			return "", err
+		}
+		if err := j.AskHuman(agent, q); err != nil {
+			return "", err
+		}
+		return "Your request went to the person running the factory. End your turn now, without more tool calls; their answer comes as your next message.", nil
 	case "ask_builder":
 		var body struct {
 			Question string `json:"question"`
