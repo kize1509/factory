@@ -61,6 +61,26 @@
   .modal .row2 { display:grid; grid-template-columns:1fr 1fr; gap:10px }
   .modal .err { color:var(--fail); font-size:13px }
   @media (max-width: 560px) { .modal .row2 { grid-template-columns:1fr } }
+  .fsb { border:2px solid var(--line); border-radius:4px; overflow:hidden; display:grid }
+  .fsb .recent { display:flex; flex-wrap:wrap; gap:6px; padding:8px 10px; border-bottom:1px solid var(--line) }
+  .fsb .recent:empty { display:none }
+  .fsb .recent button { font:12px Inter, sans-serif; border-width:1px; padding:3px 8px }
+  .fsb .crumbs { display:flex; flex-wrap:wrap; align-items:center; gap:2px; padding:6px 10px; background:var(--bg); border-bottom:1px solid var(--line); font:12px 'JetBrains Mono', monospace; color:var(--soft) }
+  .fsb .crumbs button { font:inherit; border:0; background:none; padding:2px 4px; color:var(--accent) }
+  .fsb .crumbs button:hover { text-decoration:underline }
+  .fsb .list { max-height:230px; overflow-y:auto }
+  .fsb .row { display:flex; align-items:center; gap:8px; width:100%; text-align:left; font:13px Inter, sans-serif; color:var(--fg); background:none; border:0; border-bottom:1px solid var(--line); border-radius:0; padding:6px 10px }
+  .fsb .row:last-child { border-bottom:0 }
+  .fsb .row:hover, .fsb .row:focus-visible { background:var(--bg); outline:none }
+  .fsb .row.sel { background:color-mix(in srgb, var(--accent) 16%, var(--card)) }
+  .fsb .row .n { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+  .fsb .row .git { font:9px Silkscreen, monospace; color:var(--accent-fg); background:var(--accent); padding:2px 5px; border-radius:2px }
+  .fsb .row .in { color:var(--soft); padding:0 4px }
+  .fsb .empty { padding:10px; color:var(--soft); font-size:12.5px }
+  .fsb .foot { display:flex; align-items:center; gap:10px; padding:6px 10px; border-top:1px solid var(--line); background:var(--bg); font-size:12px; color:var(--soft) }
+  .fsb .foot input { width:auto; margin:0 4px 0 0; vertical-align:middle }
+  .fsb .foot button { font-size:10px; padding:3px 7px }
+  #fs-pick { font-size:12.5px; color:var(--soft) } #fs-pick.ok b { color:var(--ok) } #fs-pick.bad { color:var(--fail) }
   #scene-view { position:fixed; inset:0; overflow:hidden }
   #left { position:absolute; inset:0 }
   #stage { position:absolute; inset:0; overflow:hidden; cursor:grab; touch-action:none;
@@ -293,7 +313,16 @@
           <option value="complex">Complex: large, vague or ambiguous, try several approaches</option>
         </select><span>Every job starts with Aristotle planning. Complex work may get a Symposium that tries several approaches side by side. Saying "this one is complex" in the notes does the same.</span></label>
       <label><b>How to test it</b> in your own words: which tests or tools prove it works. The agent turns this into commands; the engine runs them.<textarea name="tests" rows="3" placeholder="e.g. the unit tests (go test ./...) and the login e2e in e2e/login.spec.ts. Empty uses the repo's saved check plan."></textarea></label>
-      <label><b>Repository</b><input name="repo" required placeholder="/path/to/repo"></label>
+      <div style="display:grid;gap:6px">
+        <label><b>Repository</b> the git repo the agents work in: pick it below, or paste its path<input name="repo" required placeholder="~/Projects/my-app" autocomplete="off" spellcheck="false" style="font:13px 'JetBrains Mono', monospace"></label>
+        <div id="fs-pick"></div>
+        <div class="fsb">
+          <div class="recent" id="fs-recent"></div>
+          <div class="crumbs" id="fs-crumbs"></div>
+          <div class="list" id="fs-list" role="listbox" aria-label="Folders"></div>
+          <div class="foot"><span style="flex:1"><input type="checkbox" id="fs-hidden">show hidden folders</span><button type="button" id="fs-here" hidden>Use this folder</button></div>
+        </div>
+      </div>
       <details><summary>Runtime and model</summary>
         <div style="display:grid;gap:10px">
           <div class="row2">
@@ -1700,6 +1729,9 @@ async function openTask() {
   const f = document.getElementById('ntf'), saved = (() => { try { return JSON.parse(localStorage.getItem('newtask') || '{}'); } catch { return {}; } })();
   f.reset(); document.getElementById('nterr').textContent = '';
   f.repo.value = saved.repo || ''; f.tests.value = saved.tests || '';
+  document.getElementById('fs-pick').textContent = '';
+  browseTo(saved.repo ? saved.repo.replace(/\/[^/]+\/?$/, '') : '').then(ok => { if (!ok) browseTo(''); });
+  checkRepo();
   f.runtime.innerHTML = [['', 'from Admin → Roles'], ['pi', 'Pi'], ['claude-code', 'Claude Code'], ['codex', 'Codex']].map(([v, n]) => `<option value="${v}">${n}</option>`).join('');
   f.model.innerHTML = [['', 'from Admin → Roles'], ...['anthropic/claude-haiku-5-5', 'anthropic/claude-sonnet-5-5', 'anthropic/claude-opus-5-5', 'openai/gpt-6-luna', 'openai/gpt-6.1-terra', 'openai/gpt-6.1-sol'].map(m => [m, m])].map(([v, n]) => `<option value="${v}">${n}</option>`).join('');
   f.runtime.value = saved.runtime || ''; f.model.value = saved.model || '';
@@ -1710,6 +1742,62 @@ async function openTask() {
         const ln = document.getElementById('yt-setup'); if (ln) ln.onclick = ev => { ev.preventDefault(); closeModal('m-task'); openAdmin('connections'); }; } catch {}
 }
 document.getElementById('newtask').onclick = openTask;
+
+// ---------- The repository: browse folders like a file dialog ----------
+const FS = { path:'', home:'', repo:false };
+const fsRepo = () => document.getElementById('ntf').repo;
+async function browseTo(path, quiet) {
+  let d;
+  try {
+    const r = await fetch('/api/fs?' + new URLSearchParams({ path:path || '', hidden:document.getElementById('fs-hidden').checked ? '1' : '' }), { cache:'no-store' });
+    if (!r.ok) throw new Error(await r.text());
+    d = await r.json();
+  } catch (e) { if (quiet) return false; document.getElementById('fs-list').innerHTML = `<div class="empty">${escHTML(e.message || e)}</div>`; return false; }
+  Object.assign(FS, { path:d.path, home:d.home, repo:d.repo });
+  const tilde = p => d.home && (p === d.home || p.startsWith(d.home + '/')) ? '~' + p.slice(d.home.length) : p;
+  document.getElementById('fs-recent').innerHTML = d.recent.length
+    ? '<span style="font-size:12px;color:var(--soft);align-self:center">Recent</span>' + d.recent.slice(0, 8).map(q => `<button type="button" data-pick="${escHTML(q.path)}" title="${escHTML(q.path)}">${escHTML(q.name)}</button>`).join('') : '';
+  // the path as clickable steps, from home when it's inside it
+  const inHome = d.home && (d.path === d.home || d.path.startsWith(d.home + '/'));
+  const parts = (inHome ? d.path.slice(d.home.length) : d.path).split('/').filter(Boolean);
+  let at = inHome ? d.home : '';
+  document.getElementById('fs-crumbs').innerHTML = `<button type="button" data-go="${escHTML(inHome ? d.home : '/')}">${inHome ? '~' : '/'}</button>` +
+    parts.map((n, i) => { at += '/' + n; return `${i || inHome ? '/' : ''}<button type="button" data-go="${escHTML(at)}">${escHTML(n)}</button>`; }).join('');
+  const chosen = fsRepo().value.trim();
+  document.getElementById('fs-list').innerHTML = (d.parent ? `<button type="button" class="row" data-go="${escHTML(d.parent)}"><span class="n">..</span></button>` : '') +
+    (d.folders.length ? d.folders.map(f => `<button type="button" class="row${f.repo && (f.path === chosen || tilde(f.path) === chosen) ? ' sel' : ''}" ${f.repo ? `data-pick="${escHTML(f.path)}"` : `data-go="${escHTML(f.path)}"`} title="${escHTML(f.path)}">
+        <span class="n">${escHTML(f.name)}</span>${f.repo ? `<span class="git">git</span><span class="in" data-go="${escHTML(f.path)}" title="Open the folder">›</span>` : '<span class="in">›</span>'}</button>`).join('')
+      : '<div class="empty">No folders here.</div>');
+  const here = document.getElementById('fs-here');
+  here.hidden = !d.repo; here.dataset.pick = d.path;
+  return true;
+}
+function pickRepo(path) {
+  fsRepo().value = path; checkRepo();
+  document.querySelectorAll('#fs-list .row').forEach(b => b.classList.toggle('sel', b.dataset.pick === path));
+}
+// say whether what's in the field is a repo the factory can use
+let repoTimer;
+async function checkRepo() {
+  const v = fsRepo().value.trim(), out = document.getElementById('fs-pick');
+  if (!v) { out.className = ''; out.textContent = ''; return; }
+  const r = await fetch('/api/fs?' + new URLSearchParams({ path:v }), { cache:'no-store' }).catch(() => null);
+  if (fsRepo().value.trim() !== v) return;
+  const d = r && r.ok ? await r.json() : null;
+  if (!d) { out.className = 'bad'; out.textContent = 'There is no folder at this path.'; }
+  else if (!d.repo) { out.className = 'bad'; out.textContent = "This folder isn't a git repository. Pick one marked git."; }
+  else { out.className = 'ok'; out.innerHTML = `<b>✓</b> ${escHTML(d.name || projectName(d.path))}, a git repository`; }
+}
+document.querySelector('#m-task .fsb').addEventListener('click', ev => {
+  const go = ev.target.closest('[data-go]'), pick = ev.target.closest('[data-pick]');
+  if (go) browseTo(go.dataset.go);
+  else if (pick) { pickRepo(pick.dataset.pick); if (pick.closest('#fs-recent')) browseTo(pick.dataset.pick.replace(/\/[^/]+$/, '') || '/'); }
+});
+document.getElementById('fs-hidden').onchange = () => browseTo(FS.path);
+document.getElementById('ntf').repo.addEventListener('input', () => {
+  clearTimeout(repoTimer);
+  repoTimer = setTimeout(async () => { const v = fsRepo().value.trim(); checkRepo(); if (v.startsWith('/') || v.startsWith('~')) browseTo(v.replace(/\/+$/, '') || '/', true); }, 300);
+});
 document.getElementById('ntf').onsubmit = async ev => {
   ev.preventDefault();
   const f = new FormData(ev.target), err = document.getElementById('nterr');

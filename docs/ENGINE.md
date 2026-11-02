@@ -182,6 +182,7 @@ The review step is described in §8. The other roles (research, planning, humani
 | POST | `/api/jobs/<job>/continue` | guide a stuck job on: `{text}` |
 | GET | `/api/jobs/<job>/context` | what a stuck job wrote down about where it stopped |
 | GET | `/api/projects` | readable project names, by repo |
+| GET | `/api/fs?path=` | the folders in a path (home when empty), which of them are git repos, and the repos earlier jobs used; the New task form browses with it |
 | GET | `/api/events?job=<id>` | server-sent events, replays the job's log first |
 | POST | `/api/agents/<job>/<agent>/message` | steer an agent (the UFO) |
 | POST | `/api/agents/<job>/<agent>/stop` | stop an agent |
