@@ -41,6 +41,9 @@ func (s *Server) LoadJobs() {
 		if j.State != "done" && j.State != "failed" && j.State != "stuck" && j.State != "cancelled" {
 			j.State = "interrupted"
 		}
+		if j.State == "stuck" {
+			j.Restore()
+		}
 		j.SetRuntimes(s.Runtimes)
 		s.jobs[j.ID] = j
 	}

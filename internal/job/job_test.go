@@ -100,7 +100,9 @@ func (a *askAgent) Prompt(_ context.Context, text string) (string, error) {
 func (a *askAgent) Steer(string) error { return nil }
 func (a *askAgent) Stop() error        { return nil }
 
-func TestOpenQuestionWaitsForAnswer(t *testing.T) {
+// Open questions left in a handoff don't stop the job: real blockers are
+// asked with ask_human during the work, and the rest goes on to the reviewer.
+func TestOpenQuestionsGoOnAsFindings(t *testing.T) {
 	repo := t.TempDir()
 	for _, args := range [][]string{{"init", "-q", "-b", "main"}, {"config", "user.email", "t@t"}, {"config", "user.name", "t"}, {"commit", "-q", "--allow-empty", "-m", "init"}} {
 		cmd := exec.Command("git", args...)
@@ -111,20 +113,10 @@ func TestOpenQuestionWaitsForAnswer(t *testing.T) {
 	rt := &askRT{}
 	j := New(Spec{ID: "Q1", Title: "ask", Repo: repo, Prompt: "x"}, bus, rt)
 	rt.job = j
-	done := make(chan struct{})
-	go func() { j.Run(context.Background()); close(done) }()
-	for i := 0; i < 200 && !j.Waiting(); i++ {
-		time.Sleep(20 * time.Millisecond)
-	}
-	if !j.Waiting() || j.Question == "" {
-		t.Fatalf("job should wait on the question, state %s", j.State)
-	}
-	if !j.Answer("yes, include them") {
-		t.Fatal("answer not delivered")
-	}
-	<-done
-	if j.State != "done" || j.handoffs[builder].Findings[0] != "Answer from you: yes, include them" {
-		t.Fatalf("state %s, findings %v", j.State, j.handoffs[builder].Findings)
+	j.Run(context.Background())
+	n := j.handoffs[builder]
+	if j.State != "done" || len(n.OpenQuestions) != 0 || len(n.Findings) == 0 || !strings.HasPrefix(n.Findings[len(n.Findings)-1], "Open question: ") {
+		t.Fatalf("state %s, findings %v, open questions %v", j.State, n.Findings, n.OpenQuestions)
 	}
 }
 
@@ -479,5 +471,74 @@ func TestCancelStopsARunningJob(t *testing.T) {
 	}
 	if _, err := j.Continue("go on"); err == nil {
 		t.Error("a cancelled job shouldn't take guidance")
+	}
+}
+
+// helpRT plays a builder who needs a key only you have, and asks for it at once.
+type helpRT struct {
+	job   *Job
+	asked int
+}
+
+func (f *helpRT) Start(_ context.Context, s runtime.AgentSpec) (runtime.Agent, error) {
+	return &helpAgent{rt: f, cwd: s.Cwd, id: s.Agent}, nil
+}
+
+type helpAgent struct {
+	rt  *helpRT
+	cwd string
+	id  string
+}
+
+func (a *helpAgent) Prompt(_ context.Context, text string) (string, error) {
+	switch {
+	case a.id != builder:
+	case strings.Contains(text, "sk-test-42"):
+		os.WriteFile(filepath.Join(a.cwd, "app.txt"), []byte("done\n"), 0o644)
+		a.rt.job.SaveHandoff(builder, &handoff.Note{From: builder, To: "reviewers", Did: "used the key", Next: "review", Files: []string{"app.txt"}})
+	default:
+		a.rt.asked++
+		a.rt.job.AskHuman(builder, Ask{Need: "I need the payment API key", Why: "The client won't start without it."})
+	}
+	return "ok", nil
+}
+func (a *helpAgent) Steer(string) error { return nil }
+func (a *helpAgent) Stop() error        { return nil }
+
+func TestAgentAsksYouAndCarriesOn(t *testing.T) {
+	repo := t.TempDir()
+	for _, args := range [][]string{{"init", "-q", "-b", "main"}, {"config", "user.email", "t@t"}, {"config", "user.name", "t"}, {"commit", "-q", "--allow-empty", "-m", "init"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repo
+		cmd.Run()
+	}
+	bus := events.NewBus(t.TempDir())
+	rt := &helpRT{}
+	j := New(Spec{ID: "A1", Title: "pay", Repo: repo, Prompt: "wire up payments", Checks: []string{"grep -q '^done$' app.txt"}, MaxLoops: 2}, bus, rt)
+	rt.job = j
+	bus.Place(j.ID, j.Dir())
+	done := make(chan struct{})
+	go func() { j.Run(context.Background()); close(done) }()
+	for i := 0; i < 300 && !j.Waiting(); i++ {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !j.Waiting() {
+		t.Fatalf("the job should wait for you; state %s", j.stateNow())
+	}
+	j.mu.Lock()
+	q := j.Question
+	j.mu.Unlock()
+	if q != "**I need the payment API key**\n\nThe client won't start without it." {
+		t.Errorf("question %q", q)
+	}
+	if !j.Answer("use sk-test-42") {
+		t.Fatal("the answer wasn't taken")
+	}
+	<-done
+	if j.State != "done" {
+		t.Fatalf("state %s error %q", j.State, j.Error)
+	}
+	if rt.asked != 1 {
+		t.Errorf("asked %d times, want once", rt.asked)
 	}
 }

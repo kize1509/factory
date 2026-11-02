@@ -13,7 +13,8 @@ var mcpTools = []map[string]any{
 	{
 		"name": "handoff",
 		"description": "Write the handoff note for whoever works on this next. Required at the end of your phase. " +
-			"files lists repo paths that exist; evidence is optional and may point into your scratch folder.",
+			"files lists repo paths that exist; evidence is optional and may point into your scratch folder. " +
+			"Leave open_questions empty: ask for what you need with ask_human while you work.",
 		"inputSchema": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -28,6 +29,11 @@ var mcpTools = []map[string]any{
 		"description": "Name the exact shell commands that test this work, based on the test notes in your task. " +
 			"Use the project's existing tests and tools. The engine runs them after you finish and decides whether the work passes.",
 		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"commands": list_(), "why": str_()}, "required": []string{"commands"}},
+	},
+	{
+		"name":        "ask_human",
+		"description": "Ask the person running the factory for something only they can give, the moment you need it: credentials, an API key or token, access, an account, a URL, or a decision the ticket doesn't make. Also when you're stuck on the same problem after two tries. need: one sentence that starts with what you need, e.g. \"I need the Stripe test API key\" or \"I'm stuck on the failing login check: should I mock the clock or raise the timeout?\". why: one or two sentences on what you tried and why you can't go on. options: the choices, when it's a decision. Then end your turn; the answer comes as your next message.",
+		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"need": str_(), "why": str_(), "options": list_()}, "required": []string{"need"}},
 	},
 	{
 		"name": "ask_builder",
