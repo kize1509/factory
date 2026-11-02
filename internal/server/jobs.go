@@ -34,7 +34,7 @@ func (s *Server) LoadJobs() {
 		}
 		j := job.New(spec, s.Bus, s.Runtimes[spec.Runtime])
 		s.Bus.Place(j.ID, j.Dir())
-		j.State, j.Branch, j.Commit, j.PR, j.Error, j.Started = row.State, row.Branch, row.Commit, row.PR, row.Error, row.Started
+		j.State, j.Branch, j.Commit, j.PR, j.Error, j.Started, j.Island = row.State, row.Branch, row.Commit, row.PR, row.Error, row.Started, row.Island
 		if row.Title != "" {
 			j.Title = row.Title // the planner's name for it
 		}
@@ -47,6 +47,7 @@ func (s *Server) LoadJobs() {
 		j.SetRuntimes(s.Runtimes)
 		s.jobs[j.ID] = j
 	}
+	s.placeIslands()
 }
 
 func (s *Server) importJobsFile() {

@@ -57,6 +57,7 @@ type Job struct {
 	PR       string    `json:"pr,omitempty"` // the pull request's URL
 	Error    string    `json:"error,omitempty"`
 	Worktree string    `json:"worktree,omitempty"`
+	Island   int       `json:"island"` // the job's cell on the Aegean map, set once when it starts; -1 for none
 
 	bus       *events.Bus
 	rt        runtime.Runtime
@@ -195,9 +196,17 @@ func New(spec Spec, bus *events.Bus, rt runtime.Runtime) *Job {
 	if spec.MaxReviews == 0 {
 		spec.MaxReviews = 2
 	}
-	return &Job{Spec: spec, State: "starting", Started: time.Now(), bus: bus, rt: rt,
+	return &Job{Spec: spec, State: "starting", Island: -1, Started: time.Now(), bus: bus, rt: rt,
 		agents: map[string]runtime.Agent{}, handoffs: map[string]*handoff.Note{}, answers: make(chan string, 1), guide: make(chan string, 1),
 		lead: builder, inExperiment: map[string]bool{}, labels: map[string]int{}, grades: map[string]int{}, cwd: map[string]string{}}
+}
+
+// Shipped reports the job's state and what it left behind: its pull request,
+// its commit and its branch.
+func (j *Job) Shipped() (state, pr, commit, branch string) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.State, j.PR, j.Commit, j.Branch
 }
 
 func (j *Job) Dir() string { return filepath.Join(j.Repo, ".factory", "jobs", j.ID) }

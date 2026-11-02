@@ -104,12 +104,19 @@
   .hud .track span.done { background:color-mix(in srgb, var(--ok) 25%, var(--card)); color:var(--fg) }
   .hud .track span.now { background:var(--accent); color:var(--accent-fg); border-color:var(--gold); box-shadow:0 0 0 2px var(--gold) }
   .hud .line { font-size:12.5px; color:var(--soft) }
-  .hud .chips .stopjob { margin-left:auto; border-color:var(--fail); color:var(--fail) } .hud .chips .stopjob + .fold { margin-left:0 }
+  .hud .chips .stopjob, .hud .chips .deljob { border-color:var(--fail); color:var(--fail) } .hud .chips .stopjob, .hud .chips .deljob { margin-left:auto } .hud .chips .stopjob + .deljob, .hud .chips .stopjob + .fold, .hud .chips .deljob + .fold { margin-left:0 }
   .hud .line b { color:var(--fg); font-weight:600 }
-  .citycard { position:absolute; left:0; top:0; width:210px; background:var(--card); border:2px solid var(--accent); border-radius:6px; padding:7px 9px; font-size:12px; cursor:pointer;
+  .citycard { position:absolute; left:0; top:0; width:190px; background:var(--card); border:2px solid var(--accent); border-radius:6px; padding:7px 9px; font-size:12px; cursor:pointer;
               box-shadow:0 6px 16px rgba(20,33,61,.18); transition:transform .15s, opacity .3s; will-change:transform }
   .citycard:hover { border-color:var(--gold); z-index:2 }
   .citycard:not(:hover) .t, .citycard:not(:hover) .bar { display:none }
+  /* zoomed out the cities are closer than a card is wide: a name chip, the whole card on hover */
+  .citycard.chip { width:var(--cw); padding:3px 5px; border-width:1px; font-size:11px }
+  .citycard.chip b { font-size:10px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+  .citycard.chip:not(:hover):not(:focus-within) > :not(b) { display:none }
+  .citycard.chip:not(:hover):not(:focus-within) .askpill { display:none }
+  .citycard.chip:hover, .citycard.chip:focus-within { width:190px; padding:7px 9px; border-width:2px; margin-left:calc((var(--cw) - 190px) / 2); z-index:3 }
+  .citycard.chip:hover b, .citycard.chip:focus-within b { font-size:12px; overflow:visible; white-space:normal }
   .countrycard { position:absolute; left:0; top:0; background:var(--card); border:2px solid var(--ink); border-left-width:6px; border-radius:6px; padding:4px 10px; font-size:12px; white-space:nowrap; pointer-events:none;
                  box-shadow:0 4px 12px rgba(20,33,61,.2); will-change:transform }
   .countrycard b { font:13px Silkscreen, monospace; display:block }
@@ -120,6 +127,8 @@
   .askpill { font:9px Silkscreen, monospace; background:var(--warn); color:#14213d; padding:1px 4px; border-radius:2px; vertical-align:middle }
   @keyframes askpulse { 50% { box-shadow:0 0 0 7px color-mix(in srgb, var(--warn) 15%, transparent), 0 6px 16px rgba(20,33,61,.18) } }
   .citycard.empty { border-style:dashed; border-color:var(--line); cursor:default; opacity:.8 }
+  .citycard .del { display:none; margin-top:6px; font:10px Silkscreen, monospace; padding:3px 8px; border:1px solid var(--fail); color:var(--fail); background:var(--card); border-radius:3px; cursor:pointer }
+  .citycard:hover .del, .citycard:focus-within .del { display:block } .citycard .del:hover, .citycard .del:focus-visible { background:var(--fail); color:#fff }
   .citycard .bar { display:flex; gap:2px; margin-top:5px }
   .citycard .bar i { flex:1; height:4px; border-radius:1px; background:var(--line) }
   .citycard .bar i.done { background:var(--ok) } .citycard .bar i.now { background:var(--gold) }
@@ -553,9 +562,9 @@ let convos = [], ship = { phase:'docked', x:0 }, procs = [], handoffs = {}, scro
 // Every job is its own city. The globals above always hold the open city;
 // the others keep their state here while you look elsewhere.
 const JOBS = [
-  { id:'ABC-123', title:'fix login timeout', city:'Athens', slot:0, repo:'webshop', i:JOB.indexOf('review') },
-  { id:'ABC-130', title:'export invoices as CSV', city:'Corinth', slot:1, repo:'webshop', i:JOB.indexOf('build') },
-  { id:'APP-131', title:'dark mode toggle', city:'Miletus', slot:3, repo:'mobile-app', i:JOB.indexOf('human') },
+  { id:'ABC-123', title:'fix login timeout', city:'Athens', cell:53, repo:'webshop', i:JOB.indexOf('review') },
+  { id:'ABC-130', title:'export invoices as CSV', city:'Corinth', cell:52, repo:'webshop', i:JOB.indexOf('build') },
+  { id:'APP-131', title:'dark mode toggle', city:'Miletus', cell:34, repo:'mobile-app', i:JOB.indexOf('human') },
 ];
 for (const j of JOBS) j.st = { setup:JOB[j.i], agents:{}, lastSeen:{}, cost:{}, thoughts:{}, convos:[], ship:{ phase:'docked', x:0 }, procs:[], handoffs:{} };
 let cur = JOBS[0], mode = 'city';
@@ -642,7 +651,7 @@ stage.addEventListener('pointerup', e => {
   stage.classList.remove('drag'); if (!drag) return; const wasDrag = drag.moved; drag = null; if (wasDrag) return;
   const r = stage.getBoundingClientRect(), x = cam.x + (e.clientX - r.left) / cam.z, y = cam.y + (e.clientY - r.top) / cam.z;
   if (mode === 'aegean') {
-    const i = A.mapSlots.findIndex(p => Math.abs(p.x - x) < 40 && Math.abs(p.y - 14 - y) < 36), j = JOBS.find(q => q.slot === i);
+    const j = onMap().find(q => { const p = cellPos(q.cell); return Math.abs(p.x - x) < 40 && Math.abs(p.y - 14 - y) < 36; });
     if (j) enterCity(j); return;
   }
   if (scroll && scroll.phase === 'flying' && Math.hypot(scroll.x - x, scroll.y - y) < 24) { showNote(scroll.note, e.clientX - r.left, e.clientY - r.top); return; }
@@ -831,34 +840,98 @@ function follow(now, dt) {
 const mapCanvas = document.createElement('canvas'); mapCanvas.width = A.map[0]; mapCanvas.height = A.map[1];
 const mctx = mapCanvas.getContext('2d');
 const needsYou = j => SETUPS[jobSetup(j)].agents.some(a => a[2] === 'blocked') || (j === cur && Object.values(agents).some(g => g.st === 'blocked' && !g.leaving));
-// Boats keep to the sea. The day map has only three sea colours, so its
-// pixels give a grid of water cells; routes between cities are found on that
-// grid, kept off the coast, and cached.
-const SEA = 6; let seaGrid = null; const seaRoutes = {};
-{ const im = new Image(); im.onload = () => {
-    const [MW, MH] = A.map, c = document.createElement('canvas'); c.width = MW; c.height = MH;
-    const g = c.getContext('2d'); g.drawImage(im, 0, 0, MW, MH, 0, 0, MW, MH); const px = g.getImageData(0, 0, MW, MH).data;
-    const water = new Set([0x1f86c9, 0x0e4a8f, 0xd6f1fb]); // sea, sea-deep, foam
-    const gw = Math.floor(MW / SEA), gh = Math.floor(MH / SEA), wet = new Uint8Array(gw * gh);
-    for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) {
-      let ok = 1;
-      for (let dy = 0; dy < SEA && ok; dy++) for (let dx = 0; dx < SEA; dx++) {
-        const i = ((y * SEA + dy) * MW + x * SEA + dx) * 4;
-        if (!water.has(px[i] << 16 | px[i + 1] << 8 | px[i + 2])) { ok = 0; break; }
-      }
-      wet[y * gw + x] = ok;
+// ---- the lattice: every job owns one hexagonal cell of the sea ----
+// The server picks a job's cell once and stores it, so an island stays where
+// it is; here the cell only becomes a position, a neighbour or an outline.
+const LAT = A.lattice;
+const cellPos = c => { const row = Math.floor(c / LAT.cols), col = c % LAT.cols; return { x:LAT.originX + col * LAT.pitchX + (row % 2 ? LAT.pitchX / 2 : 0), y:LAT.originY + row * LAT.pitchY }; };
+const cellAt = (row, col) => row >= 0 && row < LAT.rows && col >= 0 && col < LAT.cols ? row * LAT.cols + col : -1;
+// the six cells around one, in the order of the hexagon's edges, clockwise from the top right: NE, E, SE, SW, W, NW
+const cellRing = c => { const row = Math.floor(c / LAT.cols), col = c % LAT.cols, d = row % 2 ? 0 : -1;
+  return [cellAt(row - 1, col + d + 1), cellAt(row, col + 1), cellAt(row + 1, col + d + 1), cellAt(row + 1, col + d), cellAt(row, col - 1), cellAt(row - 1, col + d)]; };
+// a cell's hexagon, clockwise from the top: the points where three cells meet
+const HEX = (() => { const hx = LAT.pitchX / 2, py = LAT.pitchY, a = (py * py - hx * hx) / (2 * py), b = (hx * hx + py * py) / (2 * py);
+  return [[0, -b], [hx, -a], [hx, a], [0, b], [-hx, a], [-hx, -a]]; })();
+const onMap = () => JOBS.filter(j => j.cell >= 0 && !j.lobby);
+const hashOf = str => { let h = 7; for (const ch of String(str)) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h; };
+const variantOf = j => hashOf(j.id) % LAT.islands;
+
+// A country is the project's cells. Its border is the outline of their union:
+// each edge between a cell of the country and a cell outside it, joined into
+// loops and rounded at the corners. Open sea enclosed by the country is
+// counted in, so the outline has no holes. Countries never touch, because the
+// server leaves a cell of sea between them.
+function outline(cells) {
+  const own = new Set(cells), reach = new Set(), q = [];
+  const outside = c => !own.has(c) && !reach.has(c);
+  for (let c = 0; c < LAT.rows * LAT.cols; c++) if (cellRing(c).includes(-1) && outside(c)) { reach.add(c); q.push(c); }
+  for (let h = 0; h < q.length; h++) for (const n of cellRing(q[h])) if (n >= 0 && outside(n)) { reach.add(n); q.push(n); }
+  const solid = new Set(); for (let c = 0; c < LAT.rows * LAT.cols; c++) if (!reach.has(c)) solid.add(c);
+  const key = p => Math.round(p[0]) + ',' + Math.round(p[1]), edges = new Map();
+  for (const c of solid) { const o = cellPos(c), ring = cellRing(c);
+    for (let i = 0; i < 6; i++) { if (ring[i] >= 0 && solid.has(ring[i])) continue;
+      const a = [o.x + HEX[i][0], o.y + HEX[i][1]], b = [o.x + HEX[(i + 1) % 6][0], o.y + HEX[(i + 1) % 6][1]], k = key(a);
+      if (!edges.has(k)) edges.set(k, []); edges.get(k).push({ a, b, used:false }); } }
+  const loops = [];
+  for (const list of edges.values()) for (const e0 of list) { if (e0.used) continue;
+    const loop = []; let e = e0;
+    while (e && !e.used) { e.used = true; loop.push(e.a); e = (edges.get(key(e.b)) || []).find(n => !n.used); }
+    for (let r = 0; r < 2; r++) { const out = []; // round the corners
+      loop.forEach((p, i) => { const n = loop[(i + 1) % loop.length]; out.push([p[0] * .75 + n[0] * .25, p[1] * .75 + n[1] * .25], [p[0] * .25 + n[0] * .75, p[1] * .25 + n[1] * .75]); });
+      loop.splice(0, loop.length, ...out); }
+    loops.push(loop.map(p => ({ x:p[0], y:p[1] }))); }
+  return loops;
+}
+// the countries now on the map, rebuilt only when a job's cell changes
+let countryKey = '', countryList = [];
+function countries() {
+  const js = onMap(), key = js.map(j => j.repo + '@' + j.cell).sort().join('|');
+  if (key === countryKey) { for (const c of countryList) c.jobs = js.filter(j => j.repo === c.repo); return countryList; }
+  countryKey = key; const by = new Map();
+  for (const j of js) { if (!by.has(j.repo)) by.set(j.repo, []); by.get(j.repo).push(j); }
+  const taken = new Set(), list = [...by].map(([repo, jobs]) => ({ repo, jobs, cap:Math.min(...jobs.map(j => j.cell)) })).sort((a, b) => a.cap - b.cap);
+  for (const c of list) { // a name from the project, the next free one if another country has it
+    let n = hashOf(c.repo) % A.countries.length; while (taken.has(n) && taken.size < A.countries.length) n = (n + 1) % A.countries.length;
+    taken.add(n); c.name = A.countries[n]; c.ink = COUNTRY_INK[hashOf(c.repo) % COUNTRY_INK.length];
+    c.loops = outline(c.jobs.map(j => j.cell)); c.pts = c.loops.flat(); }
+  return countryList = list;
+}
+
+// Boats keep to the sea. The map's pixels give a grid of water cells, taken
+// from the sea with all its islands drawn in (so it follows the countries as
+// they grow); routes between cities are found on that grid, kept off the
+// coast, and cached per job.
+const SEA = 6; let seaGrid = null, seaRoutes = {}, seaKey = '';
+const dayImgs = {};
+const dayImg = file => dayImgs[file] ||= Object.assign(new Image(), { src:file + '.png' });
+function buildSea(key) {
+  const files = [A.assets['map/base'].states.idle.file, ...onMap().map(j => A.assets['map/island'].states['v' + variantOf(j)].file)], ims = files.map(dayImg);
+  if (!ims.every(im => im.complete && im.naturalWidth)) return; // try again next frame
+  const [MW, MH] = A.map, c = document.createElement('canvas'); c.width = MW; c.height = MH;
+  const g = c.getContext('2d', { willReadFrequently:true }); g.drawImage(ims[0], 0, 0);
+  onMap().forEach((j, i) => { const p = cellPos(j.cell); g.drawImage(ims[i + 1], Math.round(p.x - A.assets['map/island'].w / 2), Math.round(p.y + 6 - A.assets['map/island'].h / 2)); });
+  const px = g.getImageData(0, 0, MW, MH).data;
+  const water = new Set([0x1f86c9, 0x0e4a8f, 0xd6f1fb]); // sea, sea-deep, foam
+  const gw = Math.floor(MW / SEA), gh = Math.floor(MH / SEA), wet = new Uint8Array(gw * gh);
+  for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) {
+    let ok = 1;
+    for (let dy = 0; dy < SEA && ok; dy++) for (let dx = 0; dx < SEA; dx++) {
+      const i = ((y * SEA + dy) * MW + x * SEA + dx) * 4;
+      if (!water.has(px[i] << 16 | px[i + 1] << 8 | px[i + 2])) { ok = 0; break; }
     }
-    // how many cells each water cell is from land
-    const clear = new Uint16Array(gw * gh), q = [];
-    for (let i = 0; i < wet.length; i++) if (!wet[i]) q.push(i); else clear[i] = 9999;
-    for (let h = 0; h < q.length; h++) { const i = q[h], x = i % gw, y = (i / gw) | 0;
-      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = x + dx, ny = y + dy, n = ny * gw + nx;
-        if (nx >= 0 && ny >= 0 && nx < gw && ny < gh && clear[n] > clear[i] + 1) { clear[n] = clear[i] + 1; q.push(n); } } }
-    seaGrid = { gw, gh, clear };
-  }; im.src = A.assets['map/base'].states.idle.file + '.png'; }
-function seaRoute(sa, sb) {
-  const key = sa + '-' + sb; if (seaRoutes[key] || !seaGrid) return seaRoutes[key] || null;
-  const { gw, gh, clear } = seaGrid, P = A.mapSlots[sa], Q = A.mapSlots[sb];
+    wet[y * gw + x] = ok;
+  }
+  // how many cells each water cell is from land
+  const clear = new Uint16Array(gw * gh), q = [];
+  for (let i = 0; i < wet.length; i++) if (!wet[i]) q.push(i); else clear[i] = 9999;
+  for (let h = 0; h < q.length; h++) { const i = q[h], x = i % gw, y = (i / gw) | 0;
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = x + dx, ny = y + dy, n = ny * gw + nx;
+      if (nx >= 0 && ny >= 0 && nx < gw && ny < gh && clear[n] > clear[i] + 1) { clear[n] = clear[i] + 1; q.push(n); } } }
+  seaGrid = { gw, gh, clear }; seaRoutes = {}; seaKey = key;
+}
+function seaRoute(ja, jb) {
+  const key = ja.id + '|' + jb.id; if (seaRoutes[key] || !seaGrid) return seaRoutes[key] || null;
+  const { gw, gh, clear } = seaGrid, P = cellPos(ja.cell), Q = cellPos(jb.cell);
   // a harbour near each city: open water close to it, on the side facing the other
   const harbour = (p, o) => { let best = -1, bs = 1e9;
     for (let i = 0; i < clear.length; i++) { if (clear[i] < 3) continue;
@@ -897,10 +970,13 @@ function renderMap(now) {
   const dt = Math.min(0.05, (now - last) / 1000); last = now; const [MW, MH] = A.map;
   mctx.imageSmoothingEnabled = false; mctx.clearRect(0, 0, MW, MH);
   sprite(mctx, 'map/base', 'idle', 0, 0);
-  A.mapSlots.forEach((p, i) => {
-    const j = JOBS.find(q => q.slot === i), st = !j ? 'empty' : jobSetup(j) === 'idle' ? (j.i > 0 ? 'done' : 'idle') : 'active';
-    sprite(mctx, 'map/polis', st, p.x - 32, p.y - 40, 1, 3, now);
-  });
+  const here = onMap(), isl = A.assets['map/island'];
+  const lkey = here.map(j => j.cell + ':' + variantOf(j)).join(','); if (seaKey !== lkey) buildSea(lkey);
+  // islands first (back rows first), then the cities on them
+  const byRow = [...here].sort((a, b) => a.cell - b.cell);
+  for (const j of byRow) { const p = cellPos(j.cell); sprite(mctx, 'map/island', 'v' + variantOf(j), p.x - isl.w / 2, p.y + 6 - isl.h / 2); }
+  for (const j of byRow) { const p = cellPos(j.cell), st = jobSetup(j) === 'idle' ? (j.i > 0 ? 'done' : 'idle') : 'active';
+    sprite(mctx, 'map/polis', st, p.x - 32, p.y - 40, 1, 3, now); }
   // visible part of the map, scaled up by a whole number
   const k = Math.max(1, Math.min(3, Math.ceil(cam.z * dpr)));
   org.x = Math.floor(cam.x); org.y = Math.floor(cam.y);
@@ -909,26 +985,26 @@ function renderMap(now) {
   bctx.imageSmoothingEnabled = false; bctx.clearRect(0, 0, big.width, big.height);
   bctx.drawImage(mapCanvas, org.x, org.y, sw, sh, 0, 0, sw * k, sh * k);
   bctx.save(); bctx.translate(-org.x * k, -org.y * k);
-  // the countries: a dashed sea border around each, brighter where a project lives
-  A.mapCountries.forEach((c, i) => {
-    const held = projectOf(i) !== undefined, ink = COUNTRY_INK[i % COUNTRY_INK.length];
-    bctx.beginPath(); c.border.forEach((p, m) => m ? bctx.lineTo(p.x * k, p.y * k) : bctx.moveTo(p.x * k, p.y * k)); bctx.closePath();
-    bctx.globalAlpha = held ? 0.10 : 0.04; bctx.fillStyle = ink; bctx.fill();
-    bctx.globalAlpha = held ? 0.85 : 0.35; bctx.strokeStyle = ink; bctx.lineWidth = (held ? 3 : 2) * k; bctx.setLineDash([10 * k, 7 * k]); bctx.lineDashOffset = 0;
+  // the countries: a dashed sea border around the cells of each project
+  for (const c of countries()) {
+    bctx.beginPath(); for (const loop of c.loops) { loop.forEach((p, m) => m ? bctx.lineTo(p.x * k, p.y * k) : bctx.moveTo(p.x * k, p.y * k)); bctx.closePath(); }
+    bctx.globalAlpha = 0.10; bctx.fillStyle = c.ink; bctx.fill();
+    bctx.globalAlpha = 0.85; bctx.strokeStyle = c.ink; bctx.lineWidth = 3 * k; bctx.lineJoin = 'round'; bctx.setLineDash([10 * k, 7 * k]); bctx.lineDashOffset = 0;
     bctx.stroke(); bctx.setLineDash([]); bctx.globalAlpha = 1;
-  });
+  }
   // sea routes and boats between cities that are working
-  const live = JOBS.filter(j => jobSetup(j) !== 'idle');
+  const live = here.filter(j => jobSetup(j) !== 'idle');
   live.forEach((a, i) => live.slice(i + 1).forEach((b, n) => {
-    const r = seaRoute(Math.min(a.slot, b.slot), Math.max(a.slot, b.slot)); if (!r || r.length < 2) return;
+    if (a.cell < 0 || b.cell < 0) return;
+    const r = seaRoute(...(a.id < b.id ? [a, b] : [b, a])); if (!r || r.length < 2) return;
     bctx.strokeStyle = dusk ? 'rgba(236,208,106,.7)' : 'rgba(255,255,255,.75)'; bctx.lineWidth = k; bctx.setLineDash([4 * k, 4 * k]); bctx.lineDashOffset = -now / 60;
     bctx.beginPath(); r.forEach((p, m) => m ? bctx.lineTo(p.x * k, p.y * k) : bctx.moveTo(p.x * k, p.y * k)); bctx.stroke(); bctx.setLineDash([]);
     const t = ((now / 12000) + i * 0.37 + n * 0.21) % 1, at = alongRoute(r, t < .5 ? t * 2 : 2 - t * 2), bo = A.assets['map/boat'];
     sprite(bctx, 'map/boat', 'idle', at.x - bo.w / 2, at.y - bo.h + 3, k, 3, now);
   }));
   // a city that needs you sends up a beacon
-  A.mapSlots.forEach((p, i) => {
-    const j = JOBS.find(q => q.slot === i); if (!j || !needsYou(j)) return;
+  here.forEach(j => {
+    if (!needsYou(j)) return; const p = cellPos(j.cell);
     const r = 26 + (now / 40) % 18;
     bctx.strokeStyle = `rgba(217,162,31,${1 - (r - 26) / 18})`; bctx.lineWidth = 2 * k;
     bctx.beginPath(); bctx.ellipse(p.x * k, (p.y - 14) * k, r * k, r * 0.7 * k, 0, 0, 7); bctx.stroke();
@@ -941,30 +1017,30 @@ function renderMap(now) {
   const mc = cam;
   // a card under each city
   const seen = new Set();
-  A.mapSlots.forEach((p, i) => {
-    const j = JOBS.find(q => q.slot === i), key = 'm:' + i;
-    if (!j && projectOf(countryOf(i)) === undefined) return; // a free country has one plaque, not a card per island
-    const e = el(key, 'citycard' + (j ? '' : ' empty')); seen.add(key);
-    const ask = j && needsYou(j);
+  here.forEach(j => {
+    const p = cellPos(j.cell), key = 'm:' + j.id;
+    const e = el(key, 'citycard'); seen.add(key);
+    const ask = needsYou(j), del = canDelete(j);
     e.classList.toggle('ask', !!ask);
-    const html = j ? `<b>${j.city}${ask ? ' <span class="askpill">needs you</span>' : ''}</b><div class="t">${j.id} · ${j.title}</div><div>${SETUPS[jobSetup(j)].label} · ${jobAgents(j)} agents · ${usd(jobCost(j))}</div><div class="bar">${stepBar(jobSetup(j), 'i')}</div>`
-                   : `<b>Free island</b><div class="t">Start a task to found a city here.</div>`;
-    if (e.dataset.h !== html) { e.dataset.h = html; e.innerHTML = html; e.onclick = j ? () => enterCity(j) : null; }
+    const html = `<b>${escHTML(j.city)}${ask ? ' <span class="askpill">needs you</span>' : ''}</b><div class="t">${escHTML(j.id)} · ${escHTML(j.title)}</div><div>${SETUPS[jobSetup(j)].label} · ${jobAgents(j)} agents · ${usd(jobCost(j))}</div><div class="bar">${stepBar(jobSetup(j), 'i')}</div>${del ? '<button class="del" data-del title="Delete this job and its island">Delete</button>' : ''}`;
+    if (e.dataset.h !== html) { e.dataset.h = html; e.innerHTML = html; e.onclick = ev => ev.target.closest('[data-del]') ? deleteJob(j) : enterCity(j); }
     const sx = (p.x - mc.x) * mc.z, sy = (p.y - mc.y) * mc.z;
-    e.style.transform = `translate(${sx - 105}px, ${sy + 24 * mc.z}px)`;
+    // a full card fits only while cities are at least 200 map px apart on screen; closer, it shrinks to a chip
+    const chip = mc.z * LAT.pitchX < 200, cw = chip ? Math.max(56, Math.min(120, mc.z * LAT.pitchX - 10)) : 190;
+    e.classList.toggle('chip', chip); e.style.setProperty('--cw', cw + 'px');
+    e.style.transform = `translate(${sx - cw / 2}px, ${sy + 24 * mc.z}px)`;
   });
   // a plaque on each country's border: the project that holds it
-  A.mapCountries.forEach((c, i) => {
-    const key = 'c:' + i, repo = projectOf(i), e = el(key, 'countrycard'); seen.add(key); e.classList.toggle('free', repo === undefined);
-    const js = JOBS.filter(q => c.slots.includes(q.slot)), running = js.filter(q => q.live ? !['done', 'failed', 'interrupted', 'cancelled'].includes(q.live.state) : jobSetup(q) !== 'idle').length;
-    const html = repo === undefined ? `<b>${c.name}</b><div>Free country</div>`
-      : `<b>${projectName(repo)}</b><div>${c.name} · ${js.length} ${js.length === 1 ? 'job' : 'jobs'}${running ? ` · ${running} working` : ''} · ${usd(js.reduce((t, q) => t + jobCost(q), 0))}</div>`;
-    if (e.dataset.h !== html) { e.dataset.h = html; e.innerHTML = html; e.title = repo || ''; }
-    e.style.setProperty('--ink', COUNTRY_INK[i % COUNTRY_INK.length]);
+  countries().forEach((c, i) => {
+    const key = 'c:' + c.repo, e = el(key, 'countrycard'); seen.add(key);
+    const js = c.jobs, running = js.filter(q => q.live ? !['done', 'failed', 'interrupted', 'cancelled'].includes(q.live.state) : jobSetup(q) !== 'idle').length;
+    const html = `<b>${escHTML(projectName(c.repo))}</b><div>${c.name} · ${js.length} ${js.length === 1 ? 'job' : 'jobs'}${running ? ` · ${running} working` : ''} · ${usd(js.reduce((t, q) => t + jobCost(q), 0))}</div>`;
+    if (e.dataset.h !== html) { e.dataset.h = html; e.innerHTML = html; e.title = c.repo || ''; }
+    e.style.setProperty('--ink', c.ink);
     // northern countries wear it on top; southern ones on the west edge, clear of the city cards above and the narrator below
-    const cx = c.border.reduce((t, p) => t + p.x, 0) / c.border.length, cy = c.border.reduce((t, p) => t + p.y, 0) / c.border.length;
-    const [x, y, dx, dy] = cy > A.map[1] / 2 ? [c.border.reduce((a, p) => p.x < a.x ? p : a).x, cy, '-50%', '-50%']
-                                             : [cx, c.border.reduce((a, p) => p.y < a.y ? p : a).y, '-50%', '-16px'];
+    const cx = c.pts.reduce((t, p) => t + p.x, 0) / c.pts.length, cy = c.pts.reduce((t, p) => t + p.y, 0) / c.pts.length;
+    const [x, y, dx, dy] = cy > A.map[1] / 2 ? [c.pts.reduce((a, p) => p.x < a.x ? p : a).x, cy, '-50%', '-50%']
+                                             : [cx, c.pts.reduce((a, p) => p.y < a.y ? p : a).y, '-50%', '-16px'];
     e.style.transform = `translate(calc(${(x - mc.x) * mc.z}px + ${dx}), calc(${(y - mc.y) * mc.z}px + ${dy}))`;
   });
   for (const [key, e] of Object.entries(els)) if (!seen.has(key)) { e.remove(); delete els[key]; }
@@ -1065,12 +1141,21 @@ function hud() {
     : `<div class="track">${stepBar(setup, 'span')}</div><div class="line"><b>${cur.id}</b> ${cur.title} · ${SETUPS[setup].label}${jobAgents(cur) ? ` · ${jobAgents(cur)} agent${jobAgents(cur) > 1 ? 's' : ''}` : ''} · <code>${usd(jobCost(cur))}</code>${LIVE ? '' : ` · discoveries ${nf}/${nl}`}</div>`;
   const min = hudMin();
   h.classList.toggle('min', min);
-  h.innerHTML = `<div class="chips"><button data-j="map" class="${mode === 'aegean' ? 'on' : ''}">Aegean</button>${chips}${mode === 'city' && canStop(cur) ? `<button class="stopjob" title="Stop ${escHTML(cur.id)} for good">Stop job</button>` : ''}<button class="fold" title="${min ? 'Show details' : 'Hide details'}">${min ? '▾' : '▴'}</button></div>${body}`;
+  h.innerHTML = `<div class="chips"><button data-j="map" class="${mode === 'aegean' ? 'on' : ''}">Aegean</button>${chips}${mode === 'city' && canStop(cur) ? `<button class="stopjob" title="Stop ${escHTML(cur.id)} for good">Stop job</button>` : ''}${mode === 'city' && canDelete(cur) ? `<button class="deljob" title="Delete ${escHTML(cur.id)} and its island">Delete job</button>` : ''}<button class="fold" title="${min ? 'Show details' : 'Hide details'}">${min ? '▾' : '▴'}</button></div>${body}`;
   h.querySelectorAll('[data-j]').forEach(b => b.onclick = () => b.dataset.j === 'map' ? showAegean() : enterCity(JOBS[+b.dataset.j]));
   h.querySelector('.fold').onclick = () => { try { localStorage.setItem('hud', min ? '1' : '0'); } catch {} hud(); };
   const sb = h.querySelector('.stopjob'); if (sb) sb.onclick = () => stopJob(cur);
+  const db = h.querySelector('.deljob'); if (db) db.onclick = () => deleteJob(cur);
 }
 const canStop = j => LIVE && j?.live && !['done', 'cancelled'].includes(j.live.state);
+// only a job that isn't running can go: finished, failed, interrupted or stopped
+const canDelete = j => LIVE && ['done', 'failed', 'interrupted', 'cancelled'].includes(j?.live?.state);
+async function deleteJob(j) {
+  if (!confirm(`Delete ${j.id} for good? Its island, history, messages and costs are removed. Work that shipped (merged commits, pull requests) is not touched.`)) return;
+  const r = await fetch(`/api/jobs/${encodeURIComponent(j.id)}`, { method:'DELETE' }).catch(e => ({ ok:false, text:async () => e.message }));
+  if (!r.ok) { narrate(`Couldn't delete ${j.id}: ${await r.text()}`); return; }
+  dropJob(j); syncJobs(); // the rest of its country closes up
+}
 async function stopJob(j) {
   if (!confirm(`Stop ${j.id} for good? Its agents stop now; the work so far stays on its branch.`)) return;
   const r = await fetch(`/api/jobs/${encodeURIComponent(j.id)}/cancel`, { method:'POST' }).catch(e => ({ ok:false, text:async () => e.message }));
@@ -1577,41 +1662,23 @@ function openStream() {
     } catch (err) { console.error(err); }
   };
 }
-// Each project is a country of three islands, and its jobs settle them. A new
-// job takes a free island in its project's country, else the place of the
-// project's oldest finished job there; only when every island there is busy
-// does the project spread to a free country. With no room at all, the oldest
-// finished city anywhere makes way.
-const countryOf = slot => A.mapCountries.findIndex(c => c.slots.includes(slot));
-const projectOf = c => JOBS.find(q => A.mapCountries[c].slots.includes(q.slot))?.repo;
-function islandFor(repo) {
-  const all = A.mapCountries.map((c, i) => i), own = all.filter(i => projectOf(i) === repo), free = all.filter(i => projectOf(i) === undefined);
-  const open = cs => { for (const c of cs) { const sl = A.mapCountries[c].slots.find(s => !JOBS.some(q => q.slot === s)); if (sl !== undefined) return sl; } };
-  const finished = JOBS.filter(q => q !== cur && ['done', 'failed', 'interrupted', 'cancelled'].includes(q.live?.state)).sort((a, b) => a.started - b.started);
-  const leave = q => { JOBS.splice(JOBS.indexOf(q), 1); return q.slot; };
-  let sl = open(own); if (sl !== undefined) return sl;
-  const mine = finished.find(q => own.includes(countryOf(q.slot))); if (mine) return leave(mine);
-  sl = open(free); if (sl !== undefined) return sl;
-  const old = finished[0]; if (!old) return JOBS.length % A.mapSlots.length;
-  // the country changes hands once all its cities are finished
-  const c = countryOf(old.slot), rest = JOBS.filter(q => countryOf(q.slot) === c);
-  if (rest.every(q => finished.includes(q))) { rest.forEach(q => JOBS.splice(JOBS.indexOf(q), 1)); return A.mapCountries[c].slots[0]; }
-  return leave(old);
-}
+// Each project is a country and each of its jobs has an island of its own in
+// it. The engine picks the island's cell when the job starts and stores it; a
+// job that has no cell yet waits for the next /api/jobs to bring it.
 const PROJECTS = {}; // repo -> its readable name, given by the planner
 const projectName = repo => PROJECTS[repo] || (repo || '').replace(/\/+$/, '').split('/').pop() || 'project';
 const COUNTRY_INK = ['#e2725b', '#ecd06a', '#fbfaf6', '#93a84a'];
 function addLiveJob(info) {
   let j = JOBS.find(q => q.id === info.id);
   if (j) return j;
-  if (JOBS.length === 1 && JOBS[0].lobby) { j = JOBS[0]; delete j.lobby; Object.assign(j, { id:info.id, title:info.title || info.id, repo:info.repo || '' }); }
+  if (JOBS.length === 1 && JOBS[0].lobby) { j = JOBS[0]; delete j.lobby; Object.assign(j, { id:info.id, title:info.title || info.id, repo:info.repo || '', cell:info.island ?? -1, seen:Date.now() }); }
   else {
-    const slot = islandFor(info.repo || '');
     const city = CITIES.find(c => !JOBS.some(q => q.city === c)) || 'Polis ' + (JOBS.length + 1);
-    j = { id:info.id, title:info.title || info.id, repo:info.repo || '', city, slot, i:0, started:Date.parse(info.started) || Date.now() };
+    j = { id:info.id, title:info.title || info.id, repo:info.repo || '', city, cell:info.island ?? -1, seen:Date.now(), i:0, started:Date.parse(info.started) || Date.now() };
     j.st = { setup:'idle', agents:{}, lastSeen:{}, cost:{}, thoughts:{}, convos:[], ship:{ phase:'docked', x:0 }, procs:[], handoffs:{} };
     JOBS.push(j);
   }
+  if (info.island === undefined) setTimeout(syncJobs, 150); // an event told of it first: the engine's list has its island
   j.live = { state:info.state || 'starting', msg:'', oracle:null };
   if (info.state === 'stuck') j.live.stuck = { error:info.error, phase:info.phase, ask:info.ask };
   if (info.state === 'waiting') j.live.question = info.question;
@@ -1628,8 +1695,7 @@ async function goLive() {
   document.getElementById('newtask').style.display = '';
   // drop the demo: one quiet city until the first real job arrives
   JOBS.length = 0;
-  const lobby = { id:'No jobs yet', title:'start one with New task', city:'Athens', slot:0, i:0, lobby:true, chron:[] };
-  lobby.st = { setup:'idle', agents:{}, lastSeen:{}, cost:{}, thoughts:{}, convos:[], ship:{ phase:'docked', x:0 }, procs:[], handoffs:{} };
+  const lobby = makeLobby();
   JOBS.push(lobby);
   ({ agents, lastSeen, cost, thoughts, convos, ship, procs, handoffs } = lobby.st); cur = lobby; scroll = null;
   applySetup('idle');
@@ -1643,9 +1709,25 @@ async function goLive() {
     // once its log has replayed, say the latest real news
     setTimeout(() => { const c = (latest.chron || [])[0]; if (c) narrate(c.text, latest, false); }, 900);
   }
-  setInterval(async () => {
-    try { const r = await fetch('/api/jobs', { cache:'no-store' }); if (r.ok) for (const info of await r.json()) if (!JOBS.some(q => q.id === info.id)) addLiveJob(info); } catch {}
-  }, 3000);
+  setInterval(syncJobs, 3000);
+}
+const makeLobby = () => ({ id:'No jobs yet', title:'start one with New task', city:'Athens', cell:-1, i:0, lobby:true, chron:[],
+  st:{ setup:'idle', agents:{}, lastSeen:{}, cost:{}, thoughts:{}, convos:[], ship:{ phase:'docked', x:0 }, procs:[], handoffs:{} } });
+// The engine's list is the truth: it brings new jobs, the cell of each island
+// (which only moves when a job in the same country is deleted), and drops
+// jobs deleted elsewhere, such as in Admin.
+async function syncJobs() {
+  let list; try { const r = await fetch('/api/jobs', { cache:'no-store' }); if (!r.ok) return; list = await r.json(); } catch { return; }
+  for (const info of list) { const j = JOBS.find(q => q.id === info.id); if (!j) addLiveJob(info); else if (info.island !== undefined) j.cell = info.island; }
+  for (const j of [...JOBS]) if (!j.lobby && !list.some(i => i.id === j.id) && Date.now() - (j.seen || 0) > 8000) dropJob(j);
+}
+// a job is gone: take its city, alarm and chips away
+function dropJob(j) {
+  const i = JOBS.indexOf(j); if (i < 0) return;
+  clearAlarm(j); JOBS.splice(i, 1);
+  if (!JOBS.length) JOBS.push(makeLobby());
+  if (cur === j) { cur = JOBS[0]; ({ agents, lastSeen, cost, thoughts, convos, ship, procs, handoffs } = cur.st); scroll = null; closeDrawer(); hidePop(); applySetup(cur.st.setup); if (mode === 'city') setWorld('aegean'); }
+  hud();
 }
 
 // ---------- telling you when a job needs you ----------

@@ -57,6 +57,17 @@ func (b *Bus) jobDir(job string) string {
 	return filepath.Join(b.dir, job)
 }
 
+// Forget closes a deleted job's log and drops its folder entry.
+func (b *Bus) Forget(job string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if f, ok := b.logs[job]; ok {
+		f.Close()
+		delete(b.logs, job)
+	}
+	delete(b.dirs, job)
+}
+
 // Emit records and publishes one event.
 func (b *Bus) Emit(job, agent, typ string, data map[string]any) Event {
 	b.mu.Lock()

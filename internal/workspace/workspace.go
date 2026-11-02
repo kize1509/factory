@@ -204,3 +204,19 @@ func (w *Worktree) Remove() {
 	git(w.Repo, "worktree", "remove", "--force", w.Path)
 	git(w.Repo, "branch", "-D", w.Branch)
 }
+
+// Discard removes the worktree and, unless it holds shipped work, the branch.
+// With keepUnmerged the branch only goes if it is merged into the repo's
+// HEAD (git's safe delete); with keep it stays.
+func (w *Worktree) Discard(keep, keepUnmerged bool) {
+	git(w.Repo, "worktree", "remove", "--force", w.Path)
+	os.RemoveAll(w.Path)
+	git(w.Repo, "worktree", "prune")
+	switch {
+	case keep || w.Branch == "":
+	case keepUnmerged:
+		git(w.Repo, "branch", "-d", w.Branch)
+	default:
+		git(w.Repo, "branch", "-D", w.Branch)
+	}
+}

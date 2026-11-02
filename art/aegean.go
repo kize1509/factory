@@ -1,7 +1,5 @@
 package art
 
-import "sort"
-
 // The Aegean map shows every job at once: each project is a country, each
 // of its jobs a city-state on one of the country's islands, and boats carry
 // Assembly messages between them. It is bigger than the screen; you drag and
@@ -9,78 +7,37 @@ import "sort"
 
 const MapW, MapH = 3000, 1800
 
-// The islands sit in the middle with open sea all round, so they never touch
-// the edge of the screen. sea moves them there; toShore stretches the mainland
-// (drawn for a 2400×1350 map) out to the edges.
-var sea = Pt{415, 250}
-
+// toShore stretches the mainland (drawn for a 2400×1350 map) out to the
+// edges of the map.
 func toShore(p Pt) Pt { return Pt{p.X * MapW / 2400, p.Y * 4 / 3} }
 
-// Country is a group of islands that one project holds. Border is the sea
-// boundary drawn around them on the map.
-type Country struct {
-	Name   string `json:"name"`
-	Slots  []int  `json:"slots"`
-	Border []Pt   `json:"border"`
-}
+// IslandVariants is how many island sprites there are. Each job's island is
+// one of them, picked by the job; the sea itself holds no islands, so a
+// project's country can grow by as many as it has jobs.
+const IslandVariants = 8
 
-// Countries come in the order projects take them. Each has three islands.
-var Countries = []Country{{Name: "Attica"}, {Name: "Ionia"}, {Name: "Cyclades"}, {Name: "Dodecanese"}}
+// IslandW and IslandH are the size of an island sprite. Its middle, where the
+// city stands, is at IslandCX, IslandCY: the browser puts that on the job's
+// lattice cell.
+const (
+	IslandW, IslandH   = 192, 140
+	IslandCX, IslandCY = 96, 70
+)
 
-var countryAt = []Pt{{640, 430}, {1750, 430}, {640, 1000}, {1750, 1000}}
-
-// MapSlots are the island centres where city-states stand: three per
-// country, country by country.
-var MapSlots []Pt
-
-func init() {
-	for c, at := range countryAt {
-		at = Pt{at.X + sea.X, at.Y + sea.Y}
-		for _, d := range []Pt{{-230, -80}, {230, -50}, {0, 160}} {
-			Countries[c].Slots = append(Countries[c].Slots, len(MapSlots))
-			MapSlots = append(MapSlots, Pt{at.X + d.X, at.Y + d.Y})
-		}
+// Island draws one island with its shallows and beach on a clear canvas.
+func Island(v int) *Canvas {
+	c := New(IslandW, IslandH)
+	r := 46 + (v*5)%11 // 46 to 56: small enough that neighbouring cells keep water between them
+	land(c, blob(Pt{IslandCX, IslandCY - 6}, r, 13, 9, v))
+	if v%2 == 0 { // a hill on some islands
+		c.Ellipse(IslandCX+r/2, IslandCY-r/4, 14, 8, Olive)
+		c.DitherOn(IslandCX+r/2-14, IslandCY-r/4-8, 28, 16, Olive, GrassLight, 0.3)
 	}
-	for c := range Countries {
-		var pts []Pt
-		for _, i := range Countries[c].Slots {
-			rx, ry := islandR(i)*138/100+70, islandR(i)*95/100+60
-			for a := 0; a < 48; a++ {
-				x, y := ringPt(a, 100)
-				pts = append(pts, Pt{MapSlots[i].X + x*rx/100, MapSlots[i].Y + 6 + y*ry/100})
-			}
-		}
-		Countries[c].Border = hull(pts)
-	}
-}
-
-func islandR(i int) int { return 80 + (i*11)%24 }
-
-// hull is the convex hull of pts, counter-clockwise (monotone chain).
-func hull(pts []Pt) []Pt {
-	sort.Slice(pts, func(a, b int) bool {
-		return pts[a].X < pts[b].X || pts[a].X == pts[b].X && pts[a].Y < pts[b].Y
-	})
-	cross := func(o, a, b Pt) int { return (a.X-o.X)*(b.Y-o.Y) - (a.Y-o.Y)*(b.X-o.X) }
-	var h []Pt
-	for pass := 0; pass < 2; pass++ {
-		start := len(h)
-		for _, p := range pts {
-			for len(h) >= start+2 && cross(h[len(h)-2], h[len(h)-1], p) <= 0 {
-				h = h[:len(h)-1]
-			}
-			h = append(h, p)
-		}
-		h = h[:len(h)-1]
-		for i, j := 0, len(pts)-1; i < j; i, j = i+1, j-1 {
-			pts[i], pts[j] = pts[j], pts[i]
-		}
-	}
-	return h
+	return c
 }
 
 // AegeanMap draws the mainland, the sea with shallows around every coast,
-// one island per slot, smaller islets and a compass rose.
+// a few islets and a compass rose. The job islands are separate sprites.
 func AegeanMap() *Canvas {
 	c := New(MapW, MapH)
 	c.Gradient(0, 0, MapW, MapH, Sea, SeaDeep)
@@ -109,23 +66,11 @@ func AegeanMap() *Canvas {
 			OliveTree(c, x, y)
 		}
 	}
-	// islands for cities, each a different shape
-	for i, s := range MapSlots {
-		r := islandR(i)
-		land(c, blob(s, r, 13, 9, i))
-		if i%2 == 0 { // a hill on some islands
-			c.Ellipse(s.X+r/2, s.Y-r/4, 16, 9, Olive)
-			c.DitherOn(s.X+r/2-16, s.Y-r/4-9, 32, 18, Olive, GrassLight, 0.3)
-		}
-	}
-	// uninhabited islets
-	for i, s := range []Pt{{1200, 720}, {1200, 300}, {1200, 1180}, {2300, 720}, {300, 1250}, {2280, 1260}} {
-		s = Pt{s.X + sea.X, s.Y + sea.Y}
+	// uninhabited islets and reefs stay out at the edges, clear of the islands' lattice
+	for i, s := range []Pt{{250, 1060}, {270, 1430}, {2935, 430}, {2930, 1700}, {1500, 1745}} {
 		land(c, blob(s, 22+(i*7)%16, 13, 9, i+3))
 	}
-	// reefs
-	for _, r := range [][2]int{{1000, 720}, {1400, 640}, {250, 700}, {1000, 1290}, {2200, 1040}, {2300, 450}} {
-		r = [2]int{r[0] + sea.X, r[1] + sea.Y}
+	for _, r := range [][2]int{{300, 720}, {2945, 1000}, {1000, 1740}, {2550, 1745}, {2940, 1330}} {
 		c.Ellipse(r[0], r[1], 6, 3, StoneDark)
 		c.Ellipse(r[0]-1, r[1]-1, 4, 2, Stone)
 		c.HLine(r[0]-9, r[0]+9, r[1]+3, Foam)
