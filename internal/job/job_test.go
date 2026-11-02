@@ -420,3 +420,64 @@ func TestStuckJobCarriesOnAfterRestart(t *testing.T) {
 		t.Errorf("one new builder should pick it up; started %d", rt2.starts)
 	}
 }
+
+// busyRT plays an agent that works until it's told to stop.
+type busyRT struct{ working, stopped chan struct{} }
+
+func (f *busyRT) Start(context.Context, runtime.AgentSpec) (runtime.Agent, error) {
+	return &busyAgent{f}, nil
+}
+
+type busyAgent struct{ rt *busyRT }
+
+func (a *busyAgent) Prompt(ctx context.Context, _ string) (string, error) {
+	select {
+	case a.rt.working <- struct{}{}:
+	default:
+	}
+	<-ctx.Done()
+	return "", ctx.Err()
+}
+func (a *busyAgent) Steer(string) error { return nil }
+func (a *busyAgent) Stop() error {
+	select {
+	case a.rt.stopped <- struct{}{}:
+	default:
+	}
+	return nil
+}
+
+func TestCancelStopsARunningJob(t *testing.T) {
+	repo := t.TempDir()
+	for _, args := range [][]string{{"init", "-q", "-b", "main"}, {"config", "user.email", "t@t"}, {"config", "user.name", "t"}, {"commit", "-q", "--allow-empty", "-m", "init"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repo
+		cmd.Run()
+	}
+	bus := events.NewBus(t.TempDir())
+	rt := &busyRT{working: make(chan struct{}, 1), stopped: make(chan struct{}, 1)}
+	j := New(Spec{ID: "C1", Title: "big job", Repo: repo, Prompt: "work forever", MaxLoops: 2}, bus, rt)
+	bus.Place(j.ID, j.Dir())
+	done := make(chan struct{})
+	go func() { j.Run(context.Background()); close(done) }()
+	<-rt.working
+	if err := j.Cancel(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the job kept running after Cancel")
+	}
+	if j.State != "cancelled" {
+		t.Fatalf("state %s, want cancelled", j.State)
+	}
+	select {
+	case <-rt.stopped:
+	default:
+		t.Error("the agent wasn't stopped")
+	}
+	if _, err := j.Continue("go on"); err == nil {
+		t.Error("a cancelled job shouldn't take guidance")
+	}
+}

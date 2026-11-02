@@ -87,6 +87,7 @@
   .st.stuck { background:color-mix(in srgb, var(--fail) 22%, var(--card)) } .st.stuck::before { background:var(--fail); animation:blink .7s infinite }
   .job.stuck { border-color:var(--fail) }
   .job .brief { margin-top:8px } .job .brief pre { max-height:260px; overflow:auto; white-space:pre-wrap; font:12px/1.5 "JetBrains Mono", monospace; margin:6px 0 0 }
+  .st.cancelled { background:var(--grid) } .st.cancelled::before { background:var(--soft) }
   .st.interrupted { background:var(--grid) } .st.interrupted::before { background:var(--soft) }
   @keyframes blink { 50% { opacity:.25 } }
   .job { border:2px solid var(--line); border-radius:6px; padding:12px 14px; margin-bottom:10px; background:var(--card) }
@@ -192,7 +193,7 @@ async function jobs() {
     list.sort((a, b) => Date.parse(b.started) - Date.parse(a.started));
     const n = s => list.filter(j => stateOf(j) === s).length;
     const html = `<div class="counts"><span class="st running">${n('running')} running</span><span class="st waiting">${n('waiting')} waiting on you</span>${n('stuck') ? `<span class="st stuck">${n('stuck')} need your guidance</span>` : ''}
-        <span class="st done">${n('done')} done</span><span class="st failed">${n('failed')} failed</span>${n('interrupted') ? `<span class="st interrupted">${n('interrupted')} interrupted</span>` : ''}</div>
+        <span class="st done">${n('done')} done</span><span class="st failed">${n('failed')} failed</span>${n('interrupted') ? `<span class="st interrupted">${n('interrupted')} interrupted</span>` : ''}${n('cancelled') ? `<span class="st cancelled">${n('cancelled')} stopped</span>` : ''}</div>
       ${list.length ? list.map(j => { const s = stats[j.id] || {}, st = stateOf(j);
         return `<div class="job ${st}" data-id="${esc(j.id)}">
           <div class="top"><span class="st ${st}">${st === 'running' ? esc(PHASE[j.state] || j.state) : st === 'waiting' ? 'waiting on you' : st === 'stuck' ? 'needs your guidance' : st}</span>
@@ -204,7 +205,7 @@ async function jobs() {
           ${['failed', 'stuck', 'interrupted'].includes(st) && j.error ? `<div class="e">${st === 'stuck' && j.phase ? `Stuck at ${esc(j.phase)}:` : ''}<div data-md="e"></div></div>` : ''}
           ${['failed', 'stuck', 'interrupted'].includes(st) ? `<details class="brief" data-brief><summary>Where it stopped: everything the agent knows</summary><pre>Loading…</pre></details>
             <form class="acts guide"><textarea name="a" rows="2" placeholder="Your guidance: what to do next, what went wrong, where to look" required style="flex:1;min-width:260px"></textarea><button class="primary">Carry on</button></form>` : ''}
-          <div class="acts">${EMBED ? '<button data-map>Show on the map</button>' : ''}${st === 'running' || st === 'waiting' || st === 'stuck' ? '<button data-stop>Stop job</button>' : ''}<span class="msg"></span></div>
+          <div class="acts">${EMBED ? '<button data-map>Show on the map</button>' : ''}${!['done', 'cancelled'].includes(st) ? '<button data-stop>Stop job</button>' : ''}<span class="msg"></span></div>
         </div>`; }).join('') : '<div class="card"><p class="empty">No jobs yet. Start one with New task on the map.</p></div>'}`;
     const focus = document.activeElement?.name === 'a' ? document.activeElement.closest('.job')?.dataset.id : null;
     if (focus || main.querySelector('details[data-brief][open]')) return; // don't redraw while you type or read
@@ -214,7 +215,8 @@ async function jobs() {
       el.querySelector('[data-md="q"]')?.appendChild(Md.render(src.question || ''));
       el.querySelector('[data-md="e"]')?.appendChild(Md.code(src.error || ''));
       el.querySelector('[data-map]')?.addEventListener('click', () => parent.postMessage({ openJob:id }, location.origin));
-      el.querySelector('[data-stop]')?.addEventListener('click', async () => { if (!confirm(`Stop ${id}?`)) return; await api(`/api/agents/${encodeURIComponent(id)}/archimedes/stop`, { method:'POST' }); msg.textContent = 'Stopping…'; });
+      el.querySelector('[data-stop]')?.addEventListener('click', async () => { if (!confirm(`Stop ${id} for good? Its agents stop now; the work so far stays on its branch.`)) return;
+        try { await api(`/api/jobs/${encodeURIComponent(id)}/cancel`, { method:'POST' }); msg.className = 'msg ok'; msg.textContent = 'Stopped.'; draw(); } catch (err) { msg.className = 'msg err'; msg.textContent = err.message; } });
       el.querySelector('details[data-brief]')?.addEventListener('toggle', async e => { if (!e.target.open) return;
         try { const c = await api(`/api/jobs/${encodeURIComponent(id)}/context`); e.target.querySelector('pre').textContent = c.brief || 'Nothing was written down for this job.'; } catch (err) { e.target.querySelector('pre').textContent = err.message; } });
       el.querySelector('form.guide')?.addEventListener('submit', async e => { e.preventDefault();

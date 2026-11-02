@@ -48,6 +48,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/jobs", s.startJob)
 	mux.HandleFunc("GET /api/jobs", s.listJobs)
 	mux.HandleFunc("POST /api/jobs/{job}/continue", s.continueJob)
+	mux.HandleFunc("POST /api/jobs/{job}/cancel", s.cancelJob)
 	mux.HandleFunc("GET /api/jobs/{job}/context", s.jobContext)
 	mux.HandleFunc("GET /api/projects", s.projects)
 	mux.HandleFunc("GET /api/fs", s.browse)
@@ -357,7 +358,24 @@ func (s *Server) stopAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.Bus.Emit(j.ID, r.PathValue("agent"), "human.stop", nil)
-	j.Stop()
+	if err := j.Cancel(); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+// cancelJob ends a job for good: running, stuck or interrupted.
+func (s *Server) cancelJob(w http.ResponseWriter, r *http.Request) {
+	j := s.job(w, r.PathValue("job"))
+	if j == nil {
+		return
+	}
+	s.Bus.Emit(j.ID, "", "human.cancel", nil)
+	if err := j.Cancel(); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
 	writeJSON(w, map[string]any{"ok": true})
 }
 
