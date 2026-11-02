@@ -50,6 +50,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/jobs/{job}/continue", s.continueJob)
 	mux.HandleFunc("GET /api/jobs/{job}/context", s.jobContext)
 	mux.HandleFunc("GET /api/projects", s.projects)
+	mux.HandleFunc("GET /api/fs", s.browse)
 	mux.HandleFunc("GET /api/events", s.events)
 	mux.HandleFunc("POST /api/agents/{job}/{agent}/message", s.message)
 	mux.HandleFunc("POST /api/agents/{job}/{agent}/stop", s.stopAgent)
@@ -120,6 +121,12 @@ func (s *Server) startJob(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "a repository and an issue ID (or a task description) are required", http.StatusBadRequest)
 		return
 	}
+	root, err := repoRoot(spec.Repo)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	spec.Repo = root
 	proj, err := config.LoadProject(spec.Repo)
 	if err != nil {
 		http.Error(w, "factory.yml: "+err.Error(), http.StatusBadRequest)
