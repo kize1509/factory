@@ -49,6 +49,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/jobs", s.listJobs)
 	mux.HandleFunc("POST /api/jobs/{job}/continue", s.continueJob)
 	mux.HandleFunc("POST /api/jobs/{job}/cancel", s.cancelJob)
+	mux.HandleFunc("DELETE /api/jobs/{job}", s.deleteJob)
 	mux.HandleFunc("GET /api/jobs/{job}/context", s.jobContext)
 	mux.HandleFunc("GET /api/projects", s.projects)
 	mux.HandleFunc("GET /api/fs", s.browse)
@@ -192,6 +193,7 @@ func (s *Server) startJob(w http.ResponseWriter, r *http.Request) {
 	j := job.New(spec, s.Bus, rt)
 	j.SetRuntimes(s.Runtimes)
 	s.jobs[spec.ID] = j
+	s.claimIsland(j)
 	s.mu.Unlock()
 	s.Bus.Place(j.ID, j.Dir())
 	s.Store.SaveJob(j.ID, spec.Issue, spec.Title, spec.Repo, spec, j.Started)

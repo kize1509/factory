@@ -72,7 +72,7 @@ func Open(path string) (*Store, error) {
 		return nil, fmt.Errorf("schema: %w", err)
 	}
 	// columns added after the first release; an existing database gets them here
-	for _, col := range []string{"pr_url TEXT"} {
+	for _, col := range []string{"pr_url TEXT", "island INTEGER"} {
 		if _, err := db.Exec(`ALTER TABLE jobs ADD COLUMN ` + col); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			return nil, fmt.Errorf("add column %s: %w", col, err)
 		}
@@ -183,6 +183,7 @@ type JobRow struct {
 	ID, Issue, Title, Repo, State, Branch, Commit, PR, Error string
 	Spec                                                     json.RawMessage
 	Started                                                  time.Time
+	Island                                                   int // its cell on the Aegean map; -1 until it has one
 }
 
 func (s *Store) SaveJob(id, issue, title, repo string, spec any, started time.Time) error {
@@ -195,7 +196,7 @@ func (s *Store) SaveJob(id, issue, title, repo string, spec any, started time.Ti
 
 func (s *Store) Jobs() ([]JobRow, error) {
 	rows, err := s.db.Query(`SELECT id, COALESCE(issue,''), COALESCE(title,''), COALESCE(repo,''), spec, COALESCE(state,''),
-		COALESCE(branch,''), COALESCE(commit_sha,''), COALESCE(pr_url,''), COALESCE(error,''), COALESCE(started,'') FROM jobs ORDER BY started`)
+		COALESCE(branch,''), COALESCE(commit_sha,''), COALESCE(pr_url,''), COALESCE(error,''), COALESCE(started,''), COALESCE(island,-1) FROM jobs ORDER BY started`)
 	if err != nil {
 		return nil, err
 	}
@@ -204,7 +205,7 @@ func (s *Store) Jobs() ([]JobRow, error) {
 	for rows.Next() {
 		var j JobRow
 		var spec, started string
-		if err := rows.Scan(&j.ID, &j.Issue, &j.Title, &j.Repo, &spec, &j.State, &j.Branch, &j.Commit, &j.PR, &j.Error, &started); err != nil {
+		if err := rows.Scan(&j.ID, &j.Issue, &j.Title, &j.Repo, &spec, &j.State, &j.Branch, &j.Commit, &j.PR, &j.Error, &started, &j.Island); err != nil {
 			return nil, err
 		}
 		j.Spec = json.RawMessage(spec)
@@ -212,6 +213,28 @@ func (s *Store) Jobs() ([]JobRow, error) {
 		out = append(out, j)
 	}
 	return out, rows.Err()
+}
+
+// SetIsland stores the Aegean cell a job's island stands on.
+func (s *Store) SetIsland(id string, cell int) error {
+	_, err := s.db.Exec(`UPDATE jobs SET island=? WHERE id=?`, cell, id)
+	return err
+}
+
+// DeleteJob removes a job and everything stored for it: its events (which
+// hold its messages and costs) and its row.
+func (s *Store) DeleteJob(id string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	for _, q := range []string{`DELETE FROM events WHERE job=?`, `DELETE FROM jobs WHERE id=?`} {
+		if _, err := tx.Exec(q, id); err != nil {
+			tx.Rollback()
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // Projects maps each repository to its readable name.

@@ -102,6 +102,7 @@
   .job .q .md, .job .e .md { margin-top:4px }
   .job .e .md .code pre, .job .e .md .code pre code { white-space:pre-wrap; overflow-wrap:anywhere }
   .job .acts { display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; align-items:center }
+  .job .acts button[data-delete] { border-color:var(--fail); color:var(--fail) } .job .acts button[data-delete]:hover, .job .acts button[data-delete]:focus-visible { background:var(--fail); color:var(--card) }
   .counts { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px }
   textarea.prompt { width:100%; min-height:220px; font:13px/1.5 "JetBrains Mono", monospace; color:var(--fg); background:var(--bg); border:2px solid var(--line); border-radius:4px; padding:10px }
   .skilltab td.c { text-align:center }
@@ -205,7 +206,7 @@ async function jobs() {
           ${st === 'stuck' && j.ask ? `<div class="q"><b>The agent says:</b><div data-md="ask"></div></div>` : ''}${['failed', 'stuck', 'interrupted'].includes(st) && j.error ? `<div class="e">${st === 'stuck' && j.phase ? `Stuck at ${esc(j.phase)}:` : ''}<div data-md="e"></div></div>` : ''}
           ${['failed', 'stuck', 'interrupted'].includes(st) ? `<details class="brief" data-brief><summary>Where it stopped: everything the agent knows</summary><pre>Loading…</pre></details>
             <form class="acts guide"><textarea name="a" rows="2" placeholder="Your guidance: what to do next, what went wrong, where to look" required style="flex:1;min-width:260px"></textarea><button class="primary">Carry on</button></form>` : ''}
-          <div class="acts">${EMBED ? '<button data-map>Show on the map</button>' : ''}${!['done', 'cancelled'].includes(st) ? '<button data-stop>Stop job</button>' : ''}<span class="msg"></span></div>
+          <div class="acts">${EMBED ? '<button data-map>Show on the map</button>' : ''}${!['done', 'cancelled'].includes(st) ? '<button data-stop>Stop job</button>' : ''}${['done', 'failed', 'interrupted', 'cancelled'].includes(st) ? '<button data-delete class="danger" title="Delete this job, its island on the map and everything stored for it">Delete job</button>' : ''}<span class="msg"></span></div>
         </div>`; }).join('') : '<div class="card"><p class="empty">No jobs yet. Start one with New task on the map.</p></div>'}`;
     const focus = document.activeElement?.name === 'a' ? document.activeElement.closest('.job')?.dataset.id : null;
     if (focus || main.querySelector('details[data-brief][open]')) return; // don't redraw while you type or read
@@ -218,6 +219,8 @@ async function jobs() {
       el.querySelector('[data-map]')?.addEventListener('click', () => parent.postMessage({ openJob:id }, location.origin));
       el.querySelector('[data-stop]')?.addEventListener('click', async () => { if (!confirm(`Stop ${id} for good? Its agents stop now; the work so far stays on its branch.`)) return;
         try { await api(`/api/jobs/${encodeURIComponent(id)}/cancel`, { method:'POST' }); msg.className = 'msg ok'; msg.textContent = 'Stopped.'; draw(); } catch (err) { msg.className = 'msg err'; msg.textContent = err.message; } });
+      el.querySelector('[data-delete]')?.addEventListener('click', async () => { if (!confirm(`Delete ${id} for good? Its island on the map, its history, messages and costs are removed. Work that shipped (merged commits, pull requests) is not touched.`)) return;
+        try { await api(`/api/jobs/${encodeURIComponent(id)}`, { method:'DELETE' }); draw(); } catch (err) { msg.className = 'msg err'; msg.textContent = err.message; } });
       el.querySelector('details[data-brief]')?.addEventListener('toggle', async e => { if (!e.target.open) return;
         try { const c = await api(`/api/jobs/${encodeURIComponent(id)}/context`); e.target.querySelector('pre').textContent = c.brief || 'Nothing was written down for this job.'; } catch (err) { e.target.querySelector('pre').textContent = err.message; } });
       el.querySelector('form.guide')?.addEventListener('submit', async e => { e.preventDefault();

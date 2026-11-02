@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"factory/art"
+	"factory/internal/aegean"
 )
 
 const out = "web/assets"
@@ -31,12 +32,26 @@ type asset struct {
 	States map[string]state `json:"states"`
 }
 
+// lattice is the grid of cells the job islands stand on (see package aegean).
+type lattice struct {
+	PitchX  int `json:"pitchX"`
+	PitchY  int `json:"pitchY"`
+	OriginX int `json:"originX"`
+	OriginY int `json:"originY"`
+	Cols    int `json:"cols"`
+	Rows    int `json:"rows"`
+	Islands int `json:"islands"` // sprite variants in map/island
+}
+
+// countryNames are the names countries take, by project.
+var countryNames = []string{"Attica", "Ionia", "Cyclades", "Dodecanese", "Crete", "Thessaly", "Epirus", "Macedonia", "Thrace", "Euboea", "Arcadia", "Laconia", "Messenia", "Boeotia", "Argolis", "Aetolia"}
+
 type manifest struct {
 	Scene        [2]int            `json:"scene"`
 	City         [2]int            `json:"city"`
 	Map          [2]int            `json:"map"`
-	MapSlots     []art.Pt          `json:"mapSlots"`
-	MapCountries []art.Country     `json:"mapCountries"`
+	Lattice      lattice           `json:"lattice"`
+	Countries    []string          `json:"countries"`
 	Layout       []art.Place       `json:"layout"`
 	Assets       map[string]asset  `json:"assets"`
 	Philosophers []art.Philosopher `json:"philosophers"`
@@ -98,6 +113,9 @@ func main() {
 	add("fx/scroll", "idle", big(art.Scroll()...)...)
 	add("fx/decks", "idle", big(art.Decks()...)...)
 	add("map/base", "idle", art.AegeanMap())
+	for v := 0; v < art.IslandVariants; v++ {
+		add("map/island", fmt.Sprintf("v%d", v), art.Island(v))
+	}
 	add("map/polis", "empty", art.Polis("empty", 0))
 	add("map/polis", "active", art.Polis("active", 0), art.Polis("active", 1))
 	add("map/polis", "idle", art.Polis("idle", 0))
@@ -112,7 +130,8 @@ func main() {
 		p.Front = art.Pt{X: p.X + a.W/2, Y: p.Y + a.H - 26}
 		m.Layout = append(m.Layout, p)
 	}
-	m.Map, m.MapSlots, m.MapCountries = [2]int{art.MapW, art.MapH}, art.MapSlots, art.Countries
+	m.Map, m.Countries = [2]int{art.MapW, art.MapH}, countryNames
+	m.Lattice = lattice{aegean.PitchX, aegean.PitchY, aegean.OriginX, aegean.OriginY, aegean.Cols, aegean.Rows, art.IslandVariants}
 	m.Philosophers = art.Philosophers
 	m.PlaceAbout, m.PeopleAbout = art.PlaceAbout, art.PeopleAbout
 	for _, p := range art.Layout {
