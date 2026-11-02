@@ -180,6 +180,7 @@ The review step is described in §8. The other roles (research, planning, humani
 | POST | `/api/jobs` | start a job: `{repo, title, prompt, checks: ["npm test"], model}` |
 | GET | `/api/jobs` | list jobs and their state |
 | POST | `/api/jobs/<job>/continue` | guide a stuck job on: `{text}` |
+| POST | `/api/jobs/<job>/cancel` | stop a job for good, whatever state it is in; its worktree and branch stay |
 | GET | `/api/jobs/<job>/context` | what a stuck job wrote down about where it stopped |
 | GET | `/api/projects` | readable project names, by repo |
 | GET | `/api/fs?path=` | the folders in a path (home when empty), which of them are git repos, and the repos earlier jobs used; the New task form browses with it |

@@ -102,6 +102,7 @@
   .hud .track span.done { background:color-mix(in srgb, var(--ok) 25%, var(--card)); color:var(--fg) }
   .hud .track span.now { background:var(--accent); color:var(--accent-fg); border-color:var(--gold); box-shadow:0 0 0 2px var(--gold) }
   .hud .line { font-size:12.5px; color:var(--soft) }
+  .hud .chips .stopjob { margin-left:auto; border-color:var(--fail); color:var(--fail) } .hud .chips .stopjob + .fold { margin-left:0 }
   .hud .line b { color:var(--fg); font-weight:600 }
   .citycard { position:absolute; left:0; top:0; width:210px; background:var(--card); border:2px solid var(--accent); border-radius:6px; padding:7px 9px; font-size:12px; cursor:pointer;
               box-shadow:0 6px 16px rgba(20,33,61,.18); transition:transform .15s, opacity .3s; will-change:transform }
@@ -953,7 +954,7 @@ function renderMap(now) {
   // a plaque on each country's border: the project that holds it
   A.mapCountries.forEach((c, i) => {
     const key = 'c:' + i, repo = projectOf(i), e = el(key, 'countrycard'); seen.add(key); e.classList.toggle('free', repo === undefined);
-    const js = JOBS.filter(q => c.slots.includes(q.slot)), running = js.filter(q => q.live ? !['done', 'failed', 'interrupted'].includes(q.live.state) : jobSetup(q) !== 'idle').length;
+    const js = JOBS.filter(q => c.slots.includes(q.slot)), running = js.filter(q => q.live ? !['done', 'failed', 'interrupted', 'cancelled'].includes(q.live.state) : jobSetup(q) !== 'idle').length;
     const html = repo === undefined ? `<b>${c.name}</b><div>Free country</div>`
       : `<b>${projectName(repo)}</b><div>${c.name} · ${js.length} ${js.length === 1 ? 'job' : 'jobs'}${running ? ` · ${running} working` : ''} · ${usd(js.reduce((t, q) => t + jobCost(q), 0))}</div>`;
     if (e.dataset.h !== html) { e.dataset.h = html; e.innerHTML = html; e.title = repo || ''; }
@@ -1062,9 +1063,16 @@ function hud() {
     : `<div class="track">${stepBar(setup, 'span')}</div><div class="line"><b>${cur.id}</b> ${cur.title} · ${SETUPS[setup].label}${jobAgents(cur) ? ` · ${jobAgents(cur)} agent${jobAgents(cur) > 1 ? 's' : ''}` : ''} · <code>${usd(jobCost(cur))}</code>${LIVE ? '' : ` · discoveries ${nf}/${nl}`}</div>`;
   const min = hudMin();
   h.classList.toggle('min', min);
-  h.innerHTML = `<div class="chips"><button data-j="map" class="${mode === 'aegean' ? 'on' : ''}">Aegean</button>${chips}<button class="fold" title="${min ? 'Show details' : 'Hide details'}">${min ? '▾' : '▴'}</button></div>${body}`;
+  h.innerHTML = `<div class="chips"><button data-j="map" class="${mode === 'aegean' ? 'on' : ''}">Aegean</button>${chips}${mode === 'city' && canStop(cur) ? `<button class="stopjob" title="Stop ${escHTML(cur.id)} for good">Stop job</button>` : ''}<button class="fold" title="${min ? 'Show details' : 'Hide details'}">${min ? '▾' : '▴'}</button></div>${body}`;
   h.querySelectorAll('[data-j]').forEach(b => b.onclick = () => b.dataset.j === 'map' ? showAegean() : enterCity(JOBS[+b.dataset.j]));
   h.querySelector('.fold').onclick = () => { try { localStorage.setItem('hud', min ? '1' : '0'); } catch {} hud(); };
+  const sb = h.querySelector('.stopjob'); if (sb) sb.onclick = () => stopJob(cur);
+}
+const canStop = j => LIVE && j?.live && !['done', 'cancelled'].includes(j.live.state);
+async function stopJob(j) {
+  if (!confirm(`Stop ${j.id} for good? Its agents stop now; the work so far stays on its branch.`)) return;
+  const r = await fetch(`/api/jobs/${encodeURIComponent(j.id)}/cancel`, { method:'POST' }).catch(e => ({ ok:false, text:async () => e.message }));
+  if (!r.ok) narrate(`Couldn't stop ${j.id}: ${await r.text()}`);
 }
 const POOL = {
   scheduler: ['One builder for retry.go, one executor for the config change.', 'Three approaches with small diffs. A Symposium is worth it here.', 'Waiting on the plan before I assign builders.', 'Executor gets the config step, it is fully spelled out.'],
@@ -1391,7 +1399,7 @@ requestAnimationFrame(frame);
 // Served by `factory serve`, the page reads real jobs and their events.
 // Served any other way, it keeps the demo above.
 const CITIES = ['Athens', 'Corinth', 'Miletus', 'Thebes', 'Argos', 'Rhodes', 'Delphi', 'Sparta', 'Ephesus', 'Syracuse', 'Knossos', 'Megara'];
-const LIVE_LABEL = { starting:'Starting', planning:'Plan', symposium:'Symposium', grading:'Grading experiments', building:'Build', checking:'Checks running', handoff:'Handoff', reviewing:'Review', committing:'Ship', shipping:'Ship', done:'Done', failed:'Failed', waiting:'Needs you', interrupted:'Interrupted', stuck:'Needs your guidance' };
+const LIVE_LABEL = { starting:'Starting', planning:'Plan', symposium:'Symposium', grading:'Grading experiments', building:'Build', checking:'Checks running', handoff:'Handoff', reviewing:'Review', committing:'Ship', shipping:'Ship', done:'Done', failed:'Failed', waiting:'Needs you', interrupted:'Interrupted', stuck:'Needs your guidance', cancelled:'Stopped' };
 const LIVE_AT = { starting:'gates', planning:'academy', symposium:'symposium', grading:'symposium', building:'workshop', checking:'oracle', handoff:'workshop', reviewing:'areopagus', committing:'harbour', shipping:'harbour', failed:'agora', waiting:'agora', interrupted:'agora', stuck:'agora' };
 const pageStart = Date.now();
 const BUILDER = 'archimedes', REVIEWER = 'socrates', PLANNER = 'aristotle', GRADER = 'zeno';
@@ -1410,7 +1418,7 @@ function liveSetup(j) {
   const lead = L.lead || BUILDER, ag = id => L.ag?.[id] || {};
   const exps = Object.entries(L.exps || {}).filter(([, x]) => !x.gone);
   const agentsHere = L.shipping ? [[lead, 'harbour', 'tool', 'Sailing with the commit']]
-    : L.state === 'done' ? []
+    : L.state === 'done' || L.state === 'cancelled' ? []
     : L.state === 'planning' ? [[PLANNER, 'academy', ag(PLANNER).thinking ? 'thinking' : 'tool', ag(PLANNER).msg || 'Exploring the code']]
     // the Symposium: one builder per hypothesis in the banquet hall, the grader with them
     : L.state === 'symposium' || L.state === 'grading' ? [
@@ -1530,6 +1538,8 @@ function onEvent(j, e) {
     case 'job.pr_opened': j.pr = d.url; say(`Pull request opened: ${d.url}`, 'ship'); break;
     case 'job.committed': say(`Committed ${code(d.sha)} on ${code(d.branch)}. The ship sails with the work.`, 'ship');
       if (!old) { L.shipping = true; refresh(j, true); setTimeout(() => { L.shipping = false; refresh(j, true); }, 16000); return; } break;
+    case 'job.cancelled': L.state = 'cancelled'; L.stuck = null; clearAlarm(j);
+      say(`You stopped ${j.id}. Its agents went home; the work so far stays on ${code(d.branch || 'its branch')}.`); refresh(j, true); return;
     case 'job.done': L.state = 'done'; say(`${j.id} is done. ${j.city} is quiet again.`, 'ok'); refresh(j, true); return;
     case 'job.stuck': L.state = 'stuck'; L.stuck = { error:d.error, phase:d.phase }; L.msg = 'Stuck: click me to guide me on';
       say(`${j.id} is stuck at ${d.phase || 'work'}: ${d.error}. Nothing is lost: it waits for your guidance, then carries on.`, 'fail');
@@ -1572,7 +1582,7 @@ const projectOf = c => JOBS.find(q => A.mapCountries[c].slots.includes(q.slot))?
 function islandFor(repo) {
   const all = A.mapCountries.map((c, i) => i), own = all.filter(i => projectOf(i) === repo), free = all.filter(i => projectOf(i) === undefined);
   const open = cs => { for (const c of cs) { const sl = A.mapCountries[c].slots.find(s => !JOBS.some(q => q.slot === s)); if (sl !== undefined) return sl; } };
-  const finished = JOBS.filter(q => q !== cur && ['done', 'failed', 'interrupted'].includes(q.live?.state)).sort((a, b) => a.started - b.started);
+  const finished = JOBS.filter(q => q !== cur && ['done', 'failed', 'interrupted', 'cancelled'].includes(q.live?.state)).sort((a, b) => a.started - b.started);
   const leave = q => { JOBS.splice(JOBS.indexOf(q), 1); return q.slot; };
   let sl = open(own); if (sl !== undefined) return sl;
   const mine = finished.find(q => own.includes(countryOf(q.slot))); if (mine) return leave(mine);
@@ -1644,9 +1654,10 @@ function alarm(j, kind, why, quiet = false) {
   if (!el) { el = document.createElement('div'); alarmed.set(j.id, el); alerts.appendChild(el); }
   el.className = 'al ' + kind;
   el.innerHTML = `<div><b>${escHTML(j.city)} · ${escHTML(j.id)} ${kind === 'stuck' ? 'is stuck' : 'has a question'}</b><span class="why">${escHTML(Md.oneLine(why || '', 300))}</span></div>
-    <button class="primary">${kind === 'stuck' ? 'Guide it on' : 'Answer'}</button><button data-show>Show</button>`;
+    <button class="primary">${kind === 'stuck' ? 'Guide it on' : 'Answer'}</button><button data-show>Show</button><button data-stop title="Stop this job for good">Stop</button>`;
   el.querySelector('.primary').onclick = () => openGuide(j);
   el.querySelector('[data-show]').onclick = () => enterCity(j);
+  el.querySelector('[data-stop]').onclick = () => stopJob(j);
   titleCount();
   if (quiet) return;
   chime();

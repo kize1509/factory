@@ -38,7 +38,7 @@ func (s *Server) LoadJobs() {
 		if row.Title != "" {
 			j.Title = row.Title // the planner's name for it
 		}
-		if j.State != "done" && j.State != "failed" && j.State != "stuck" {
+		if j.State != "done" && j.State != "failed" && j.State != "stuck" && j.State != "cancelled" {
 			j.State = "interrupted"
 		}
 		j.SetRuntimes(s.Runtimes)

@@ -58,18 +58,19 @@ type Job struct {
 	Error    string    `json:"error,omitempty"`
 	Worktree string    `json:"worktree,omitempty"`
 
-	bus      *events.Bus
-	rt       runtime.Runtime
-	mu       sync.Mutex
-	agents   map[string]runtime.Agent
-	handoffs map[string]*handoff.Note
-	cancel   context.CancelFunc
-	answers  chan string // your replies while the job waits on you
-	reviewRT runtime.Runtime
-	verdict  *Verdict
-	asked    int // questions the reviewer asked this round
-	ctx      context.Context
-	Question string `json:"question,omitempty"`
+	bus       *events.Bus
+	rt        runtime.Runtime
+	mu        sync.Mutex
+	agents    map[string]runtime.Agent
+	handoffs  map[string]*handoff.Note
+	cancel    context.CancelFunc
+	cancelled bool        // you cancelled it: it ends for good
+	answers   chan string // your replies while the job waits on you
+	reviewRT  runtime.Runtime
+	verdict   *Verdict
+	asked     int // questions the reviewer asked this round
+	ctx       context.Context
+	Question  string `json:"question,omitempty"`
 
 	rts           map[string]runtime.Runtime // every runtime, to pick one per role
 	lead          string                     // the builder whose work goes forward
@@ -275,16 +276,37 @@ func (j *Job) Answer(text string) bool {
 	}
 }
 
-func (j *Job) Stop() {
-	if j.cancel != nil {
-		j.cancel()
+// Cancel ends the job for good, in whatever state it is: its agents stop,
+// a running check is killed, and it can't be guided on any more. The
+// worktree and branch stay, so the work done so far isn't thrown away.
+func (j *Job) Cancel() error {
+	j.mu.Lock()
+	if j.State == "done" || j.State == "cancelled" {
+		defer j.mu.Unlock()
+		return fmt.Errorf("%s is already %s", j.ID, j.State)
 	}
+	j.cancelled = true
+	alive, cancel := j.alive, j.cancel
+	j.mu.Unlock()
+	if alive && cancel != nil {
+		cancel() // Run ends and marks it cancelled
+		return nil
+	}
+	j.markCancelled() // stuck from before a restart, failed or interrupted: no Run to end
+	return nil
+}
+
+func (j *Job) markCancelled() {
+	j.mu.Lock()
+	j.Error, j.Phase = "", ""
+	j.mu.Unlock()
+	j.set("cancelled")
+	j.emit("", "job.cancelled", map[string]any{"worktree": j.Worktree, "branch": j.Branch})
 }
 
 // Run takes the job to a commit. It never gives up on its own: when it
 // can't get further it gets stuck, tells you, and waits with its agents for
-// your guidance, then carries on. Only you stopping it ends Run; a stopped
-// job stays stuck and can still be guided on later.
+// your guidance, then carries on. Only you cancelling it ends Run early.
 func (j *Job) Run(parent context.Context) {
 	ctx, cancel := context.WithCancel(parent)
 	j.mu.Lock()
@@ -300,16 +322,13 @@ func (j *Job) Run(parent context.Context) {
 		if err == nil {
 			break
 		}
+		if ctx.Err() != nil {
+			break // cancelled
+		}
 		j.mu.Lock()
 		phase := j.State
 		j.mu.Unlock()
-		if ctx.Err() != nil {
-			err = fmt.Errorf("you stopped the job")
-		}
 		j.stuck(phase, err, work)
-		if ctx.Err() != nil {
-			break
-		}
 		select {
 		case g := <-j.guide:
 			r := j.loadResume()
@@ -326,11 +345,15 @@ func (j *Job) Run(parent context.Context) {
 	}
 	j.mu.Lock()
 	j.alive = false
+	cancelled := j.cancelled && j.State != "done"
 	for id, a := range j.agents {
 		a.Stop()
 		delete(j.agents, id)
 	}
 	j.mu.Unlock()
+	if cancelled {
+		j.markCancelled()
+	}
 }
 
 func (j *Job) takeResume() *Resume {
