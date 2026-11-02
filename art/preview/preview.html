@@ -110,6 +110,13 @@
               box-shadow:0 6px 16px rgba(20,33,61,.18); transition:transform .15s, opacity .3s; will-change:transform }
   .citycard:hover { border-color:var(--gold); z-index:2 }
   .citycard:not(:hover) .t, .citycard:not(:hover) .bar { display:none }
+  /* zoomed out the cities are closer than a card is wide: a name chip, the whole card on hover */
+  .citycard.chip { width:var(--cw); padding:3px 5px; border-width:1px; font-size:11px }
+  .citycard.chip b { font-size:10px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+  .citycard.chip:not(:hover):not(:focus-within) > :not(b) { display:none }
+  .citycard.chip:not(:hover):not(:focus-within) .askpill { display:none }
+  .citycard.chip:hover, .citycard.chip:focus-within { width:190px; padding:7px 9px; border-width:2px; margin-left:calc((var(--cw) - 190px) / 2); z-index:3 }
+  .citycard.chip:hover b, .citycard.chip:focus-within b { font-size:12px; overflow:visible; white-space:normal }
   .countrycard { position:absolute; left:0; top:0; background:var(--card); border:2px solid var(--ink); border-left-width:6px; border-radius:6px; padding:4px 10px; font-size:12px; white-space:nowrap; pointer-events:none;
                  box-shadow:0 4px 12px rgba(20,33,61,.2); will-change:transform }
   .countrycard b { font:13px Silkscreen, monospace; display:block }
@@ -1018,7 +1025,10 @@ function renderMap(now) {
     const html = `<b>${escHTML(j.city)}${ask ? ' <span class="askpill">needs you</span>' : ''}</b><div class="t">${escHTML(j.id)} · ${escHTML(j.title)}</div><div>${SETUPS[jobSetup(j)].label} · ${jobAgents(j)} agents · ${usd(jobCost(j))}</div><div class="bar">${stepBar(jobSetup(j), 'i')}</div>${del ? '<button class="del" data-del title="Delete this job and its island">Delete</button>' : ''}`;
     if (e.dataset.h !== html) { e.dataset.h = html; e.innerHTML = html; e.onclick = ev => ev.target.closest('[data-del]') ? deleteJob(j) : enterCity(j); }
     const sx = (p.x - mc.x) * mc.z, sy = (p.y - mc.y) * mc.z;
-    e.style.transform = `translate(${sx - 95}px, ${sy + 24 * mc.z}px)`;
+    // a full card fits only while cities are at least 200 map px apart on screen; closer, it shrinks to a chip
+    const chip = mc.z * LAT.pitchX < 200, cw = chip ? Math.max(56, Math.min(120, mc.z * LAT.pitchX - 10)) : 190;
+    e.classList.toggle('chip', chip); e.style.setProperty('--cw', cw + 'px');
+    e.style.transform = `translate(${sx - cw / 2}px, ${sy + 24 * mc.z}px)`;
   });
   // a plaque on each country's border: the project that holds it
   countries().forEach((c, i) => {

@@ -1,10 +1,12 @@
 package server
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"factory/internal/aegean"
 	"factory/internal/job"
@@ -106,9 +108,11 @@ func (s *Server) deleteJob(w http.ResponseWriter, r *http.Request) {
 	}
 	wt := &workspace.Worktree{Repo: j.Repo, Path: filepath.Join(j.Repo, ".factory", "worktrees", j.ID), Branch: branch}
 	wt.Discard(pr != "", commit != "")
+	// the Symposium's experiment worktrees and their exp/<id>/N branches: never shipped, so both go
 	if matches, _ := filepath.Glob(filepath.Join(j.Repo, ".factory", "worktrees", j.ID+"-exp-*")); len(matches) > 0 {
-		for _, m := range matches { // the Symposium's experiment worktrees
-			(&workspace.Worktree{Repo: j.Repo, Path: m}).Discard(true, false)
+		for _, m := range matches {
+			n := strings.TrimPrefix(filepath.Base(m), j.ID+"-exp-")
+			(&workspace.Worktree{Repo: j.Repo, Path: m, Branch: fmt.Sprintf("exp/%s/%s", j.ID, n)}).Discard(false, false)
 		}
 	}
 	writeJSON(w, map[string]any{"ok": true, "moved": moved})
