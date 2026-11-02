@@ -308,7 +308,7 @@
       <aside id="drawer"></aside>
       <div id="narr" class="min" title="Homer tells the story: click to open"><canvas width="104" height="104"></canvas><div style="flex:1;min-width:0"><div class="who">Homer tells the story<span id="narr-where"></span></div><div class="txt" id="narr-txt"></div></div><button class="fold" title="Collapse Homer">–</button></div>
       <div class="legend chron" id="chron"></div>
-      <div class="zoom"><button id="zin" title="Zoom in">+</button><button id="zout" title="Zoom out">-</button><button id="zfit" class="wide" title="Back to the city">City</button><button id="zworld" class="wide" title="See the whole world">World</button></div>
+      <div class="zoom"><button id="zin" title="Zoom in">+</button><button id="zout" title="Zoom out">-</button><button id="zfit" class="wide" title="Center the map">Center</button><button id="zworld" class="wide" title="See the whole world">World</button></div>
     </div>
   </div>
 </div>
@@ -368,7 +368,7 @@
 <script>document.write('<script src="../songs/songs.js?t=' + Date.now() + '"><\/script>')</script>
 <script>
 const A = window.ASSETS;
-let [W, H] = A.scene;                       // size of the world being shown (city or Aegean)
+let [W, H] = A.map;                         // size of the world being shown (city or Aegean)
 const usd = v => '$' + v.toFixed(2);
 const stage = document.getElementById('stage'), view = document.getElementById('c'), ctx = view.getContext('2d'), ov = document.getElementById('ov');
 const big = document.createElement('canvas'), bctx = big.getContext('2d'), org = { x:0, y:0 };
@@ -567,7 +567,7 @@ const JOBS = [
   { id:'APP-131', title:'dark mode toggle', city:'Miletus', cell:34, repo:'mobile-app', i:JOB.indexOf('human') },
 ];
 for (const j of JOBS) j.st = { setup:JOB[j.i], agents:{}, lastSeen:{}, cost:{}, thoughts:{}, convos:[], ship:{ phase:'docked', x:0 }, procs:[], handoffs:{} };
-let cur = JOBS[0], mode = 'city';
+let cur = JOBS[0], mode = 'aegean';
 function useJob(j) {
   Object.assign(cur.st, { setup, agents, lastSeen, cost, thoughts, convos, ship, procs, handoffs });
   cur = j; ({ agents, lastSeen, cost, thoughts, convos, ship, procs, handoffs } = j.st); scroll = null;
@@ -618,12 +618,20 @@ const cam = { z:1, x:0, y:0, fit:1, cover:1, follow:true, until:0 };
 let dpr = 1, vw = 0, vh = 0, vw0 = 0, vh0 = 0;
 const CITY = { x:A.city[0] + 640, y:A.city[1] + 380 };
 function centerOn(x, y, z) { cam.z = Math.max(cam.cover, Math.min(cam.cover * 8, z)); cam.x = x - vw / cam.z / 2; cam.y = y - vh / cam.z / 2; clampCam(); }
+// frame every country on the map (the whole map when none are there yet)
+function fitMap() {
+  const pts = countries().flatMap(c => c.pts);
+  if (!pts.length) return centerOn(W / 2, H / 2, cam.cover);
+  const xs = pts.map(p => p.x), ys = pts.map(p => p.y), pad = 80;
+  const x0 = Math.min(...xs) - pad, x1 = Math.max(...xs) + pad, y0 = Math.min(...ys) - pad, y1 = Math.max(...ys) + pad;
+  centerOn((x0 + x1) / 2, (y0 + y1) / 2, Math.min(vw / (x1 - x0), vh / (y1 - y0)));
+}
 function resize() {
   dpr = window.devicePixelRatio || 1; vw = stage.clientWidth; vh = stage.clientHeight;
   view.width = Math.round(vw * dpr); view.height = Math.round(vh * dpr);
   const first = !cam.ready, cx = cam.x + vw0 / cam.z / 2, cy = cam.y + vh0 / cam.z / 2;
   cam.fit = cam.cover = Math.max(vw / W, vh / H); cam.city = Math.max(cam.cover, Math.min(vw / 1300, vh / 640));
-  if (first) { cam.ready = true; centerOn(CITY.x, CITY.y, cam.city); } else centerOn(cx, cy, Math.max(cam.z, cam.cover));
+  if (first) { cam.ready = true; mode === 'city' ? centerOn(CITY.x, CITY.y, cam.city) : fitMap(); } else centerOn(cx, cy, Math.max(cam.z, cam.cover));
   vw0 = vw; vh0 = vh;
   if (vw && vh) render(performance.now());
 }
@@ -699,7 +707,7 @@ pop.addEventListener('pointerdown', e => e.stopPropagation());
 stage.addEventListener('wheel', e => { e.preventDefault(); cam.until = performance.now() + 8000; const r = stage.getBoundingClientRect(); setZoom(cam.z * Math.exp(-e.deltaY * 0.0015), e.clientX - r.left, e.clientY - r.top); }, { passive:false });
 document.getElementById('zin').onclick = () => setZoom(cam.z * 1.4, vw / 2, vh / 2);
 document.getElementById('zout').onclick = () => setZoom(cam.z / 1.4, vw / 2, vh / 2);
-document.getElementById('zfit').onclick = () => { cam.until = performance.now() + 4000; mode === 'city' ? centerOn(CITY.x, CITY.y, cam.city) : centerOn(W / 2, H / 2, cam.cover * 1.15); };
+document.getElementById('zfit').onclick = () => { cam.until = performance.now() + 4000; mode === 'city' ? centerOn(CITY.x, CITY.y, cam.city) : fitMap(); };
 document.getElementById('zworld').onclick = () => { cam.until = performance.now() + 8000; centerOn(W / 2, H / 2, cam.cover); };
 
 // ---------- UFO: brings your message to an agent ----------
@@ -1055,7 +1063,7 @@ function setWorld(m) {
   const s = saved[m];
   if (s) { cam.z = Math.max(cam.cover, s.z); cam.x = s.x; cam.y = s.y; clampCam(); }
   else if (m === 'city') centerOn(CITY.x, CITY.y, cam.city);
-  else centerOn(W / 2, H / 2, cam.cover * 1.15);
+  else fitMap();
   document.getElementById('zfit').textContent = m === 'city' ? 'City' : 'Center';
 }
 function enterCity(j) {
@@ -1705,7 +1713,7 @@ async function goLive() {
   openStream();
   if (JOBS.length && !JOBS[0].lobby) {
     const latest = JOBS[JOBS.length - 1];
-    enterCity(latest);
+    fitMap();
     // once its log has replayed, say the latest real news
     setTimeout(() => { const c = (latest.chron || [])[0]; if (c) narrate(c.text, latest, false); }, 900);
   }
