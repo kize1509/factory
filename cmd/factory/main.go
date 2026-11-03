@@ -2,6 +2,7 @@
 //
 //	factory init            add factory.yml and ignore .factory/ in this repo
 //	factory serve [flags]   start the engine and the web interface
+//	factory test replay|results <run> [--json]   reproduce or read a recorded run (docs/TESTING.md)
 package main
 
 import (
@@ -33,6 +34,8 @@ func main() {
 		initRepo()
 	case "serve":
 		serve(os.Args[2:])
+	case "test":
+		os.Exit(testCmd(os.Args[2:]))
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command %q\n", os.Args[1])
 		os.Exit(2)

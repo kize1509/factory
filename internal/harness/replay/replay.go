@@ -51,9 +51,10 @@ type Runtime struct {
 	Bus   *events.Bus // optional: where runtime events go back to
 	Hooks Hooks       // set with Bind before the job runs
 
-	mu   sync.Mutex
-	next map[string]int // agent -> turns played
-	all  map[string][]record.Turn
+	mu    sync.Mutex
+	drift *Drift         // the first drift seen, if any
+	next  map[string]int // agent -> turns played
+	all   map[string][]record.Turn
 }
 
 func New(root string, bus *events.Bus) *Runtime {
@@ -95,6 +96,13 @@ func (r *Runtime) Start(_ context.Context, spec runtime.AgentSpec) (runtime.Agen
 	return &agent{r: r, spec: spec}, nil
 }
 
+// Drift is the first prompt that differed from the recording, or nil.
+func (r *Runtime) Drift() *Drift {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.drift
+}
+
 // Unplayed lists recorded turns the replay never reached, "agent#n". An
 // engine that does less than it did when recorded leaves some.
 func (r *Runtime) Unplayed() []string {
@@ -129,7 +137,13 @@ func (a *agent) Prompt(ctx context.Context, text string) (string, error) {
 	}
 	t := ts[i]
 	if norm := record.Normalize(text, a.spec.Cwd); t.Prompt != norm {
-		return "", &Drift{Agent: name, N: t.N, Diff: LineDiff(t.Prompt, norm)}
+		d := &Drift{Agent: name, N: t.N, Diff: LineDiff(t.Prompt, norm)}
+		r.mu.Lock()
+		if r.drift == nil {
+			r.drift = d
+		}
+		r.mu.Unlock()
+		return "", d
 	}
 	if r.Bus != nil {
 		for _, e := range t.Events {
