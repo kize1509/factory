@@ -15,6 +15,7 @@ type Worktree struct {
 	Repo   string // the project's main checkout
 	Path   string // .factory/worktrees/<job>
 	Branch string // factory/<job>
+	Remote string // the branch on origin it ships to, when not Branch
 }
 
 // Create adds a worktree on a new branch from the repo's current HEAD.
@@ -100,18 +101,81 @@ func (w *Worktree) Push() error {
 	if err := w.Sync(); err != nil {
 		return err
 	}
-	_, err := git(w.Path, "push", "-u", "origin", w.Branch)
+	_, err := git(w.Path, "push", "-u", "origin", w.Branch+":refs/heads/"+w.RemoteBranch())
 	return err
+}
+
+// ForcePush replaces origin's copy of the branch with this one. It still
+// refuses if origin moved since the last fetch, so it only drops commits
+// the engine has seen.
+func (w *Worktree) ForcePush() error {
+	remote := w.RemoteBranch()
+	has, err := w.onOrigin(remote)
+	if err != nil {
+		return err
+	}
+	if !has { // nothing there to overwrite
+		_, err := git(w.Path, "push", "-u", "origin", w.Branch+":refs/heads/"+remote)
+		return err
+	}
+	if _, err := git(w.Path, "fetch", "-q", "origin", "+refs/heads/"+remote+":refs/remotes/origin/"+remote); err != nil {
+		return err
+	}
+	_, err = git(w.Path, "push", "-u", "--force-with-lease=refs/heads/"+remote, "origin", w.Branch+":refs/heads/"+remote)
+	return err
+}
+
+// RemoteBranch is the branch on origin the job ships to: Remote when set,
+// otherwise the job branch's own name.
+func (w *Worktree) RemoteBranch() string {
+	if w.Remote != "" {
+		return w.Remote
+	}
+	return w.Branch
+}
+
+// FreeBranch finds a name next to the job branch (factory/X-2, -3, ...)
+// that origin doesn't have yet.
+func (w *Worktree) FreeBranch() (string, error) {
+	for n := 2; n < 100; n++ {
+		name := fmt.Sprintf("%s-%d", w.Branch, n)
+		has, err := w.onOrigin(name)
+		if err != nil {
+			return "", err
+		}
+		if !has {
+			return name, nil
+		}
+	}
+	return "", fmt.Errorf("origin already has %s-2 to %s-99", w.Branch, w.Branch)
+}
+
+// onOrigin reports whether origin has the branch.
+func (w *Worktree) onOrigin(branch string) (bool, error) {
+	cmd := exec.Command("git", "ls-remote", "--exit-code", "--heads", "origin", branch)
+	cmd.Dir = w.Path
+	var errb bytes.Buffer
+	cmd.Stderr = &errb
+	err := cmd.Run()
+	if err == nil {
+		return true, nil
+	}
+	if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 2 {
+		return false, nil // origin answered: no such branch
+	}
+	return false, fmt.Errorf("git ls-remote origin %s: %v: %s", branch, err, strings.TrimSpace(errb.String()))
 }
 
 // Sync fetches origin's copy of the job branch and, when it has moved on,
 // rebases the job branch onto it. No copy on origin is fine.
 func (w *Worktree) Sync() error {
-	remote := "refs/remotes/origin/" + w.Branch
-	if _, err := git(w.Path, "fetch", "-q", "origin", "+refs/heads/"+w.Branch+":"+remote); err != nil {
-		if _, lerr := git(w.Path, "ls-remote", "--exit-code", "--heads", "origin", w.Branch); lerr != nil {
-			return nil // the branch isn't on origin yet
-		}
+	branch := w.RemoteBranch()
+	has, err := w.onOrigin(branch)
+	if err != nil || !has {
+		return err
+	}
+	remote := "refs/remotes/origin/" + branch
+	if _, err := git(w.Path, "fetch", "-q", "origin", "+refs/heads/"+branch+":"+remote); err != nil {
 		return err
 	}
 	if _, err := git(w.Path, "merge-base", "--is-ancestor", remote, "HEAD"); err == nil {
@@ -119,7 +183,7 @@ func (w *Worktree) Sync() error {
 	}
 	if _, err := git(w.Path, "rebase", "-q", remote); err != nil {
 		git(w.Path, "rebase", "--abort")
-		return fmt.Errorf("origin/%s has commits that conflict with the job's; rebase them by hand: %w", w.Branch, err)
+		return fmt.Errorf("origin/%s has commits that conflict with the job's; rebase them by hand: %w", branch, err)
 	}
 	return nil
 }
@@ -133,12 +197,20 @@ func (w *Worktree) IsClean() bool {
 // OpenPR opens a pull request for the job branch with the gh CLI and
 // returns its URL.
 func (w *Worktree) OpenPR(title, body string) (string, error) {
-	cmd := exec.Command("gh", "pr", "create", "--head", w.Branch, "--title", title, "--body", body)
+	cmd := exec.Command("gh", "pr", "create", "--head", w.RemoteBranch(), "--title", title, "--body", body)
 	cmd.Dir = w.Path
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("gh pr create: %v: %s", err, strings.TrimSpace(errb.String()))
+		msg := strings.TrimSpace(errb.String())
+		if strings.Contains(msg, "already exists") { // opened earlier, by hand or by a repair turn
+			for _, f := range strings.Fields(msg) {
+				if strings.HasPrefix(f, "https://") {
+					return f, nil
+				}
+			}
+		}
+		return "", fmt.Errorf("gh pr create: %v: %s", err, msg)
 	}
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
 	return strings.TrimSpace(lines[len(lines)-1]), nil

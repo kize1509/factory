@@ -89,7 +89,7 @@ func (j *Job) waitForYou(ctx context.Context, agent string, q *Ask) (string, err
 
 // plea asks the lead agent, while it's still there, to tell you in a few
 // words what it needs from you to get the stuck job going again.
-func (j *Job) plea(ctx context.Context, err error) string {
+func (j *Job) plea(ctx context.Context, err error, phase string, repeats int) string {
 	j.mu.Lock()
 	lead := j.lead
 	if lead == "" {
@@ -104,12 +104,28 @@ func (j *Job) plea(ctx context.Context, err error) string {
 	if len(why) > 1500 {
 		why = why[:1500] + "…"
 	}
+	var extra string
+	if repeats > 0 {
+		last := ""
+		j.mu.Lock()
+		if n := len(j.guidance); n > 0 {
+			last = j.guidance[n-1]
+		}
+		j.mu.Unlock()
+		extra += fmt.Sprintf("This is the same failure %d times in a row, so the last attempt (%q) didn't help. Say so plainly and suggest something different, not the same thing again. ", repeats+1, last)
+	}
+	if acts := j.actions(phase, repeats); len(acts) > 0 {
+		extra += "Besides writing to them, they can pick one of these ways out: " + optionsLine(acts) + ". If one fits, name it. "
+	}
+	if shipPhase(phase) {
+		extra += "Don't ask for permission to run git commands: whatever they write goes to an agent with git in the job's worktree, so ask for a decision instead. "
+	}
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
 	out, e := a.Prompt(ctx, "The engine can't get this job further on its own:\n\n"+why+"\n\n"+
 		"The person running the factory reads your next reply first, so write it to them. At most three short sentences. "+
 		"Start with what you need from them (\"I need …\") or what you're stuck on (\"I'm stuck on …: should I … or …?\"), then say why in one sentence. "+
-		"No recap of the task, no list of what you did, no code blocks, no tools.")
+		extra+"No recap of the task, no list of what you did, no code blocks, no tools.")
 	out = strings.TrimSpace(out)
 	if e != nil || out == "" {
 		return ""

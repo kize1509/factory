@@ -335,17 +335,17 @@ func TestResumeAtShippingKeepsPushedCommit(t *testing.T) {
 	<-done
 	pushed := gitOut(t, remote, "rev-parse", "factory/P2")
 
-	// a new engine carries it on; the PR gets opened by hand, so just push
-	spec.Ship = "push"
+	// a new engine carries it on; you'll open the PR by hand, so just push
 	rt2 := &committingRT{}
 	j2 := New(spec, bus, rt2)
 	j2.State = "stuck"
+	j2.Restore()
 	rt2.job = j2
-	if start, err := j2.Continue("try again"); err != nil || !start {
+	if start, err := j2.ContinueWith("", "skip_pr"); err != nil || !start {
 		t.Fatalf("continue: %v %v", start, err)
 	}
 	j2.Run(context.Background())
-	if j2.State != "done" {
+	if j2.State != "done" || j2.PR != "" {
 		t.Fatalf("state %s error %q", j2.State, j2.Error)
 	}
 	if got := gitOut(t, remote, "rev-parse", "factory/P2"); got != pushed {

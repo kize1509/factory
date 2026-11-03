@@ -36,24 +36,31 @@ type Resume struct {
 	Base       string    `json:"base"`          // the commit the job started from
 	Checks     []string  `json:"checks,omitempty"`
 	Guidance   []string  `json:"guidance,omitempty"` // everything you said so far, oldest first
+	Action     string    `json:"action,omitempty"`   // the way out you picked, for the next run
+	Repeats    int       `json:"repeats,omitempty"`  // resumes in a row that ended in this same failure
+	Ship       string    `json:"ship,omitempty"`     // the ship mode, when an action changed it
+	PushTo     string    `json:"push_to,omitempty"`  // the branch on origin it ships to, when not the job branch
 	Stuck      time.Time `json:"stuck"`
 }
 
 // stuck records where the job stopped and why, and tells you.
-func (j *Job) stuck(phase string, err error, work *workspace.Worktree, ask string) {
+func (j *Job) stuck(phase string, err error, work *workspace.Worktree, ask string, repeats int) {
+	acts := j.actions(phase, repeats)
 	j.mu.Lock()
-	r := Resume{Phase: phase, Error: err.Error(), Ask: ask, Lead: j.lead, Base: j.base, Checks: j.Checks, Guidance: j.guidance, Stuck: time.Now()}
+	r := Resume{Phase: phase, Error: err.Error(), Ask: ask, Lead: j.lead, Base: j.base, Checks: j.Checks, Guidance: j.guidance, Stuck: time.Now(),
+		Repeats: repeats, Ship: j.Ship, PushTo: j.pushTo}
 	if work != nil {
 		r.Work, r.WorkBranch = work.Path, work.Branch
 	}
-	j.Error, j.Phase, j.Ask = r.Error, phase, ask
+	j.Error, j.Phase, j.Ask, j.Actions, j.Repeats = r.Error, phase, ask, acts, repeats
 	j.mu.Unlock()
 	os.MkdirAll(j.Dir(), 0o755)
 	os.WriteFile(filepath.Join(j.Dir(), "resume.json"), mustJSON(r), 0o644)
 	brief := j.brief(&r, work)
 	os.WriteFile(filepath.Join(j.Dir(), "resume.md"), []byte(brief), 0o644)
 	j.set("stuck")
-	j.emit(j.lead, "job.stuck", map[string]any{"error": r.Error, "phase": phase, "ask": ask, "context": filepath.Join(j.Dir(), "resume.md")})
+	j.emit(j.lead, "job.stuck", map[string]any{"error": r.Error, "phase": phase, "ask": ask, "context": filepath.Join(j.Dir(), "resume.md"),
+		"actions": acts, "repeats": repeats})
 }
 
 // Brief is the written context of a stuck job: what you read before you
@@ -85,6 +92,12 @@ func (j *Job) brief(r *Resume, work *workspace.Worktree) string {
 	fmt.Fprintf(&b, "## Where it stopped\n\nStep: %s\n\nWhy: %s\n\n", phaseName(r.Phase), r.Error)
 	if r.Ask != "" {
 		fmt.Fprintf(&b, "The agent asked: %s\n\n", r.Ask)
+	}
+	if r.Repeats > 0 {
+		fmt.Fprintf(&b, "This is the same failure %d times in a row: what was tried after it got stuck didn't change anything.\n\n", r.Repeats+1)
+	}
+	if acts := j.actions(r.Phase, r.Repeats); len(acts) > 0 {
+		fmt.Fprintf(&b, "Ways out besides guidance: %s.\n\n", optionsLine(acts))
 	}
 	if len(r.Checks) > 0 {
 		fmt.Fprintf(&b, "## Checks\n\nThe engine checks the work with: %s\n\n", strings.Join(quoted(r.Checks), ", "))
@@ -169,8 +182,13 @@ func phaseName(p string) string {
 // the agent's request.
 func (j *Job) Restore() {
 	r := j.loadResume()
+	if r.Ship != "" {
+		j.Ship = r.Ship
+	}
+	j.pushTo = r.PushTo
+	acts := j.actions(r.Phase, r.Repeats)
 	j.mu.Lock()
-	j.Phase, j.Ask = r.Phase, r.Ask
+	j.Phase, j.Ask, j.Actions, j.Repeats = r.Phase, r.Ask, acts, r.Repeats
 	j.mu.Unlock()
 }
 
@@ -184,26 +202,36 @@ func (j *Job) Resumable() bool {
 // Continue hands your guidance to a stuck job. A job still alive in this
 // engine takes it at once; otherwise it reports true and the caller starts
 // Run again, which picks the work up from what was written down.
-func (j *Job) Continue(text string) (start bool, err error) {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return false, fmt.Errorf("write some guidance for the agent")
+func (j *Job) Continue(text string) (start bool, err error) { return j.ContinueWith(text, "") }
+
+// ContinueWith is Continue with one of the ways out the stuck job offered
+// (see Actions). With an action the text is optional.
+func (j *Job) ContinueWith(text, action string) (start bool, err error) {
+	text, action = strings.TrimSpace(text), strings.TrimSpace(action)
+	if text == "" && action == "" {
+		return false, fmt.Errorf("write some guidance for the agent, or pick a way out")
 	}
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	if j.State != "stuck" && j.State != "failed" && j.State != "interrupted" {
 		return false, fmt.Errorf("%s is %s, not stuck", j.ID, j.State)
 	}
+	if action != "" && !j.hasAction(action) {
+		return false, fmt.Errorf("%s can't %q from where it stopped", j.ID, action)
+	}
 	if j.alive {
 		select {
-		case j.guide <- text:
+		case j.guide <- nudge{text, action}:
 			return false, nil
 		default:
 			return false, fmt.Errorf("%s is already carrying on", j.ID)
 		}
 	}
 	r := j.loadResume()
-	r.Guidance = append(r.Guidance, text)
+	if text != "" {
+		r.Guidance = append(r.Guidance, text)
+	}
+	r.Action = action
 	j.resume, j.guidance, j.Phase, j.Ask = r, r.Guidance, "", ""
 	return true, nil
 }
@@ -211,28 +239,20 @@ func (j *Job) Continue(text string) (start bool, err error) {
 // carryOn picks a stuck job up again: the same builder (or a new one with
 // the written brief) gets your guidance, then the checks, handoff, review
 // and commit follow as usual.
-func (j *Job) carryOn(ctx context.Context, wt *workspace.Worktree, r *Resume) (*workspace.Worktree, runtime.Agent, bool, error) {
+func (j *Job) carryOn(ctx context.Context, wt *workspace.Worktree, r *Resume) (*workspace.Worktree, runtime.Agent, error) {
 	if r.Base != "" && j.base == "" {
 		j.base = r.Base
 	}
 	if len(j.Checks) == 0 && len(r.Checks) > 0 {
 		j.Checks = r.Checks
 	}
-	work := wt
-	if r.Work != "" && r.Work != wt.Path {
-		if _, err := os.Stat(r.Work); err == nil { // the winning experiment's worktree
-			work = &workspace.Worktree{Repo: j.Repo, Path: r.Work, Branch: r.WorkBranch}
-		}
-	}
+	work := j.workFor(wt, r)
 	lead := r.Lead
 	if lead == "" || (work == wt && lead != builder) {
 		lead = builder // an experiment whose worktree is gone: the main builder takes over
 	}
 	guidance := r.Guidance[len(r.Guidance)-1]
 	j.emit("", "job.resumed", map[string]any{"guidance": guidance, "phase": r.Phase, "lead": lead})
-	if r.Phase == "committing" || r.Phase == "shipping" {
-		return work, j.Agent(lead), true, nil // the work was done; only the commit or push is left
-	}
 
 	j.mu.Lock()
 	j.lead = lead
@@ -255,7 +275,7 @@ func (j *Job) carryOn(ctx context.Context, wt *workspace.Worktree, r *Resume) (*
 		a, err = j.rtFor("builder").Start(ctx, runtime.AgentSpec{Job: j.ID, Agent: lead, Cwd: work.Path, Model: role.Model,
 			System: prompts.For("builder"), Role: "builder", Skills: skills.Dirs(role.Skills)})
 		if err != nil {
-			return nil, nil, false, fmt.Errorf("start builder: %w", err)
+			return nil, nil, fmt.Errorf("start builder: %w", err)
 		}
 		j.mu.Lock()
 		j.agents[lead] = a
@@ -266,9 +286,9 @@ func (j *Job) carryOn(ctx context.Context, wt *workspace.Worktree, r *Resume) (*
 			work.Path, guidance, filepath.Join(j.Dir(), "scratch"))
 	}
 	if _, err := j.ask(ctx, a, msg); err != nil {
-		return work, a, false, fmt.Errorf("builder: %w", err)
+		return work, a, fmt.Errorf("builder: %w", err)
 	}
-	return work, a, false, nil
+	return work, a, nil
 }
 
 // Name records a readable title for the job (and, the first time, for the
