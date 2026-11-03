@@ -75,6 +75,66 @@ var mcpTools = []map[string]any{
 		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"run": str_(), "verdict": str_(), "note": str_()}, "required": []string{"run", "verdict"}},
 	},
 	{
+		"name": "ask_ops",
+		"description": "Ask the operations agent (Hermes) a question: is there a ticket about X, what did the planner decide about Y, what did the user say on HF-5, who works on what. " +
+			"It answers briefly and names its sources (issue IDs, job, agent, event).",
+		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"question": str_()}, "required": []string{"question"}},
+	},
+	{
+		"name": "report",
+		"description": "Tell the operations agent something the factory should remember: what you did, a decision, a finding, a blocker, or a note from the user. " +
+			"kind is did, decision, finding, blocker or user_note; issues lists the tickets it is about.",
+		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"kind": str_(), "text": str_(), "issues": list_()}, "required": []string{"kind", "text"}},
+	},
+	{
+		"name": "tracker_search", "description": "Hermes only: search the tracker with a YouTrack query (the mapped project is added).",
+		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"query": str_()}, "required": []string{"query"}},
+	},
+	{
+		"name": "tracker_read", "description": "Hermes only: read one issue with its comments, links, attachments, tags and recent changes.",
+		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"id": str_()}, "required": []string{"id"}},
+	},
+	{
+		"name": "knowledge_search", "description": "Hermes only: search the notes the factory kept (decisions, findings, blockers, user notes).",
+		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"query": str_()}, "required": []string{"query"}},
+	},
+	{
+		"name": "tracker_create", "description": "Hermes only: create an issue in the mapped project. Description: what is wrong today, Expected, Done when, with file paths and line hints.",
+		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{
+			"project": str_(), "summary": str_(), "description": str_(), "type": str_(), "priority": str_(), "subsystem": str_(), "complexity": str_(), "ship_mode": str_(),
+			"tags":  list_(),
+			"links": map[string]any{"type": "array", "items": map[string]any{"type": "object", "properties": map[string]any{"type": str_(), "id": str_()}, "required": []string{"type", "id"}}},
+		}, "required": []string{"summary", "description"}},
+	},
+	{
+		"name": "tracker_update", "description": "Hermes only: set fields (Type, Priority, Subsystem, Complexity, Ship mode, Assignee, State) on an issue.",
+		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"id": str_(), "fields": map[string]any{"type": "object", "additionalProperties": str_()}}, "required": []string{"id", "fields"}},
+	},
+	{
+		"name": "tracker_move", "description": "Hermes only: move an issue to a state on the board.",
+		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"id": str_(), "state": str_()}, "required": []string{"id", "state"}},
+	},
+	{
+		"name": "tracker_comment", "description": "Hermes only: comment on an issue.",
+		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"id": str_(), "text": str_()}, "required": []string{"id", "text"}},
+	},
+	{
+		"name": "tracker_link", "description": "Hermes only: link an issue to another (subtask of, parent for, relates to, duplicates, is duplicated by, depends on, is required for), optionally with a tag.",
+		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"id": str_(), "type": str_(), "target": str_(), "tag": str_()}, "required": []string{"id", "type", "target"}},
+	},
+	{
+		"name": "tracker_attach", "description": "Hermes only: attach a file (screenshot, video, log) from the repo or the factory's folder to an issue.",
+		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"id": str_(), "path": str_()}, "required": []string{"id", "path"}},
+	},
+	{
+		"name": "answer", "description": "Hermes only: end a question with a short answer and its sources (issue IDs, job, agent, event #).",
+		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"text": str_(), "sources": list_()}, "required": []string{"text"}},
+	},
+	{
+		"name": "handover", "description": "Hermes only: end a handover with context, decisions, open points and links for the next agent.",
+		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"context": str_(), "decisions": list_(), "open_points": list_(), "links": list_()}, "required": []string{"context"}},
+	},
+	{
 		"name":        "set_status",
 		"description": "Say in a few words what you are doing now. Shown above your head on the map.",
 		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"step": str_()}, "required": []string{"step"}},
@@ -129,6 +189,14 @@ func (s *Server) mcp(w http.ResponseWriter, r *http.Request) {
 		}
 		json.Unmarshal(req.Params, &p)
 		if ps := s.passOf(r.PathValue("job")); ps != nil {
+			if text, handled, err := s.opsTool(r.PathValue("job"), r.PathValue("agent"), p.Name, p.Arguments); handled {
+				if err != nil {
+					reply(toolResult(err.Error(), true))
+					return
+				}
+				reply(toolResult(text, false))
+				return
+			}
 			text, err := passTool(ps, r.PathValue("agent"), p.Name, p.Arguments)
 			if err != nil {
 				reply(toolResult(err.Error(), true))

@@ -123,7 +123,7 @@ func (s *Server) getSettings(w http.ResponseWriter, _ *http.Request) {
 	if e.YouTrack.Token != "" {
 		token = "••••" + e.YouTrack.Token[max(0, len(e.YouTrack.Token)-4):]
 	}
-	writeJSON(w, map[string]any{"roles": roles, "role_names": config.RoleNames, "youtrack": map[string]any{"url": e.YouTrack.URL, "token": token},
+	writeJSON(w, map[string]any{"roles": roles, "role_names": config.RoleNames, "projects": e.Projects, "youtrack": map[string]any{"url": e.YouTrack.URL, "token": token},
 		"limits": e.Limits, "wire": e.Wire})
 }
 
@@ -134,7 +134,8 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 			URL   string `json:"url"`
 			Token string `json:"token"` // empty or masked keeps the stored one
 		} `json:"youtrack"`
-		Limits *config.Limits `json:"limits"`
+		Limits   *config.Limits                 `json:"limits"`
+		Projects map[string]config.ProjectRoles `json:"projects"` // role overrides per repo
 	}
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -154,6 +155,22 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		e.Roles = in.Roles
+	}
+	if in.Projects != nil {
+		problems := map[string]string{}
+		for repo, pr := range in.Projects {
+			for name, role := range pr.Roles {
+				if p := config.CheckRole(role); p != "" {
+					problems[repo+" "+name] = p
+				}
+			}
+		}
+		if len(problems) > 0 {
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			writeJSON(w, map[string]any{"problems": problems})
+			return
+		}
+		e.Projects = in.Projects
 	}
 	e.YouTrack.URL = strings.TrimSpace(in.YouTrack.URL)
 	if t := strings.TrimSpace(in.YouTrack.Token); t != "" && !strings.HasPrefix(t, "••••") {
@@ -189,6 +206,20 @@ type metrics struct {
 	Checks map[string]*checkTot `json:"checks"`
 	// Messages are the individual events behind Edges, newest last.
 	Messages []edgeMsg `json:"messages"`
+	// Ops is what the operations agent (Hermes) did; its cost is Agents["hermes"].
+	Ops opsMetric `json:"ops"`
+}
+
+type opsMetric struct {
+	Calls     int `json:"calls"` // every tracker call: search, read and writes
+	Created   int `json:"created"`
+	Moved     int `json:"moved"`
+	Comments  int `json:"comments"`
+	Handovers int `json:"handovers"`
+	Answers   int `json:"answers"`
+	Reports   int `json:"reports"`
+	Drafts    int `json:"drafts"`
+	Refused   int `json:"refused"`
 }
 
 type edgeMsg struct {
@@ -311,6 +342,41 @@ func (s *Server) adminMetrics(w http.ResponseWriter, _ *http.Request) {
 				jm.Handoffs.Missing++
 			case "handoff.rejected":
 				jm.Handoffs.Rejected++
+			case "tracker.search", "tracker.read", "tracker.issue.created", "tracker.issue.updated", "tracker.issue.moved",
+				"tracker.comment.added", "tracker.link.added", "tracker.attachment.added":
+				m.Ops.Calls++
+				switch e.Type {
+				case "tracker.issue.created":
+					m.Ops.Created++
+				case "tracker.issue.moved":
+					m.Ops.Moved++
+				case "tracker.comment.added":
+					m.Ops.Comments++
+				}
+			case "tracker.draft":
+				m.Ops.Drafts++
+			case "tracker.refused":
+				m.Ops.Refused++
+			case "ops.report":
+				m.Ops.Reports++
+				m.Edges[e.Agent+">hermes"]++
+				m.Messages = append(m.Messages, edgeMsg{id, e.Time, e.Agent, "hermes", "report", short(str(d["text"]), 200)})
+			case "ops.request":
+				m.Edges[e.Agent+">hermes"]++
+				m.Messages = append(m.Messages, edgeMsg{id, e.Time, e.Agent, "hermes", "ask", short(str(d["question"]), 200)})
+			case "ops.answer":
+				m.Ops.Answers++
+				to := str(d["to"])
+				m.Edges["hermes>"+to]++
+				m.Messages = append(m.Messages, edgeMsg{id, e.Time, "hermes", to, "answer", short(str(d["answer"]), 200)})
+			case "ops.handover":
+				m.Ops.Handovers++
+				from, to := str(d["from"]), str(d["to"])
+				m.Edges[from+">hermes"]++
+				m.Edges["hermes>"+to]++
+				m.Messages = append(m.Messages, edgeMsg{id, e.Time, "hermes", to, "handover", short(str(d["text"]), 200)})
+			case "ops.push":
+				m.Edges["hermes>"+e.Agent]++
 			case "human.message":
 				m.Edges["you>"+e.Agent]++
 				m.Messages = append(m.Messages, edgeMsg{id, e.Time, "you", e.Agent, "you", short(str(d["text"]), 200)})
@@ -358,7 +424,7 @@ func credits() string {
 
 // prompts: the system prompt per role, with your edits (Admin → Prompts)
 
-var liveRoles = map[string]bool{"builder": true, "reviewer": true, "planner": true} // roles the engine runs today
+var liveRoles = map[string]bool{"builder": true, "reviewer": true, "planner": true, "ops": true} // roles the engine runs today
 
 func (s *Server) getPrompts(w http.ResponseWriter, _ *http.Request) {
 	var out []map[string]any

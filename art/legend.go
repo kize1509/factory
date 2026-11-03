@@ -40,6 +40,7 @@ var PeopleAbout = map[string]string{
 	"protagoras":   "Rewrites prompts and comments in plain language.",
 	"isocrates":    "Rewrites docs and PR text plainly.",
 	"xenophon":     "Writes it up and ships it.",
+	"hermes":       "Carries news between agents and keeps the board in step.",
 	"homer":        "The narrator. Tells you what is happening in the city and why.",
 	"solomun":      "DJ. Plays sets at the Theatre.",
 }

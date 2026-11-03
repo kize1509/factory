@@ -110,6 +110,52 @@ function factoryTools(req) {
       parameters: Type.Object({ step: Type.String() }),
       execute: (_id, params) => call("set_status", params),
     }),
+    defineTool({
+      name: "ask_ops",
+      label: "Ask Hermes",
+      description: "Ask the operations agent (Hermes) a question: is there a ticket about X, what did the planner decide about Y, what did the user say on HF-5, who works on what. It answers briefly and names its sources (issue IDs, job, agent, event).",
+      parameters: Type.Object({ question: Type.String() }),
+      execute: (_id, params) => call("ask_ops", params),
+    }),
+    defineTool({
+      name: "report",
+      label: "Report to Hermes",
+      description: "Tell the operations agent something the factory should remember: what you did, a decision, a finding, a blocker, or a note from the user. kind is did, decision, finding, blocker or user_note; issues lists the tickets it is about.",
+      parameters: Type.Object({ kind: Type.String(), text: Type.String(), issues: Type.Optional(Type.Array(Type.String())) }),
+      execute: (_id, params) => call("report", params),
+    }),
+  ];
+}
+
+// Hermes (role ops) runs the tracker. The engine checks and logs each call (D2).
+function opsTools(req) {
+  const call = async (tool, params) => {
+    const res = await fetch(`${req.engine}/api/tools/${req.job}/${req.agent}/${tool}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(params),
+    });
+    const text = await res.text();
+    return { content: [{ type: "text", text: res.ok ? text : `Error: ${text}` }], details: {} };
+  };
+  const tool = (name, description, parameters) =>
+    defineTool({ name, label: name, description, parameters, execute: (_id, params) => call(name, params) });
+  const S = Type.String(), L = Type.Array(Type.String()), O = (t) => Type.Optional(t);
+  return [
+    tool("tracker_search", "Search the tracker with a YouTrack query (the mapped project is added).", Type.Object({ query: S })),
+    tool("tracker_read", "Read one issue with its comments, links, attachments, tags and recent changes.", Type.Object({ id: S })),
+    tool("knowledge_search", "Search the notes the factory kept (decisions, findings, blockers, user notes).", Type.Object({ query: S })),
+    tool("tracker_create", "Create an issue in the mapped project. Description: what is wrong today, Expected, Done when, with file paths and line hints.", Type.Object({
+      project: O(S), summary: S, description: S, type: O(S), priority: O(S), subsystem: O(S), complexity: O(S), ship_mode: O(S), tags: O(L),
+      links: O(Type.Array(Type.Object({ type: S, id: S }))),
+    })),
+    tool("tracker_update", "Set fields (Type, Priority, Subsystem, Complexity, Ship mode, Assignee, State) on an issue.", Type.Object({ id: S, fields: Type.Record(Type.String(), Type.String()) })),
+    tool("tracker_move", "Move an issue to a state on the board.", Type.Object({ id: S, state: S })),
+    tool("tracker_comment", "Comment on an issue.", Type.Object({ id: S, text: S })),
+    tool("tracker_link", "Link an issue to another (subtask of, parent for, relates to, duplicates, is duplicated by, depends on, is required for), optionally with a tag.", Type.Object({ id: S, type: S, target: S, tag: O(S) })),
+    tool("tracker_attach", "Attach a file (screenshot, video, log) from the repo or the factory's folder to an issue.", Type.Object({ id: S, path: S })),
+    tool("answer", "End a question with a short answer and its sources (issue IDs, job, agent, event #).", Type.Object({ text: S, sources: O(L) })),
+    tool("handover", "End a handover with context, decisions, open points and links for the next agent.", Type.Object({ context: S, decisions: O(L), open_points: O(L), links: O(L) })),
   ];
 }
 
@@ -156,11 +202,14 @@ async function start(req) {
     agentDir: req.agentDir,
     model,
     thinkingLevel: req.thinking || "medium",
-    tools: [...(req.tools || ["read", "bash", "edit", "write", "grep", "find", "ls"]), "handoff", "set_checks", "set_status",
+    tools: req.role === "ops"
+      ? [...(req.tools || ["read", "grep", "find", "ls"]), "set_status", "ask_ops", "report", "tracker_search", "tracker_read", "knowledge_search",
+         "tracker_create", "tracker_update", "tracker_move", "tracker_comment", "tracker_link", "tracker_attach", "answer", "handover"]
+      : [...(req.tools || ["read", "bash", "edit", "write", "grep", "find", "ls"]), "handoff", "set_checks", "set_status", "ask_ops", "report",
       ...(req.role === "reviewer" ? ["ask_builder", "verdict", "grade"] : ["ask_human"]),
       ...(req.role === "builder" || req.role === "planner" ? ["propose_experiments"] : []),
       ...(req.role === "planner" ? ["name_job"] : [])],
-    customTools: factoryTools(req),
+    customTools: req.role === "ops" ? [...factoryTools(req), ...opsTools(req)] : factoryTools(req),
     resourceLoader: loader,
     sessionManager: SessionManager.inMemory(req.cwd),
     modelRuntime,

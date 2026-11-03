@@ -57,6 +57,11 @@
   .msg { font-size:13px; margin-left:8px }
   .msg.err { color:var(--fail) } .msg.ok { color:var(--ok) }
   .empty { color:var(--soft); font-style:italic }
+  .draft { display:flex; gap:12px; align-items:center; flex-wrap:wrap; padding:10px 0; border-top:1px solid var(--grid) }
+  .draft .what { flex:1 1 320px }
+  .draft .who { color:var(--soft); font-size:12px }
+  .draft .err { color:var(--fail); font-size:12px }
+  .draft button:focus-visible, #main button:focus-visible, #main select:focus-visible { outline:2px solid var(--accent); outline-offset:2px }
   .offline { background:color-mix(in srgb, var(--warn) 20%, var(--card)); border-color:var(--warn) }
   svg text { fill:var(--fg); font:11px Inter, sans-serif }
   .cg { position:relative }
@@ -123,7 +128,7 @@
 <main id="main"></main>
 <div id="tip"></div>
 <script>
-const TABS = [['jobs', 'Jobs'], ['connections', 'Connections'], ['runtimes', 'Runtimes'], ['models', 'Models'], ['roles', 'Roles'], ['prompts', 'Prompts'], ['skills', 'Skills'], ['prices', 'Prices'], ['metrics', 'Metrics'], ['limits', 'Limits']];
+const TABS = [['jobs', 'Jobs'], ['queue', 'Review queue'], ['connections', 'Connections'], ['runtimes', 'Runtimes'], ['models', 'Models'], ['roles', 'Roles'], ['prompts', 'Prompts'], ['skills', 'Skills'], ['prices', 'Prices'], ['metrics', 'Metrics'], ['limits', 'Limits']];
 let tab = (location.hash || '#jobs').slice(1);
 const EMBED = new URLSearchParams(location.search).has('embed');   // shown inside the map's Admin window
 if (EMBED) document.documentElement.classList.add('embed');
@@ -141,7 +146,7 @@ async function show() {
   nav();
   main.innerHTML = '<div class="card"><span class="empty">Loading…</span></div>';
   clearInterval(refresher);
-  try { await ({ jobs, connections, runtimes, models, roles, prompts, skills, prices, metrics, limits })[tab](); }
+  try { await ({ jobs, queue, connections, runtimes, models, roles, prompts, skills, prices, metrics, limits })[tab](); }
   catch (e) { main.innerHTML = `<div class="card offline"><h2>The engine isn't answering</h2><p>Start it with <code>go run ./cmd/factory serve</code> and open <code>http://127.0.0.1:7777/admin.html</code>.</p><p class="mono">${esc(e.message)}</p></div>`; }
 }
 
@@ -245,9 +250,32 @@ async function models() {
   main.innerHTML = `<div class="grid">${list('anthropic', 'Claude (Anthropic)')}${list('openai', 'GPT (OpenAI)')}</div>`;
 }
 
+// ---------- Review queue: Hermes's tracker writes at the Propose level ----------
+async function queue() {
+  const [{ drafts }, set] = await Promise.all([api('/api/ops/drafts'), api('/api/admin/settings')]);
+  const pending = drafts.filter(d => d.state === 'pending'), past = drafts.filter(d => d.state !== 'pending').slice(0, 15);
+  const base = (set.youtrack.url || '').replace(/\/$/, '');
+  const when = d => new Date(d.created).toLocaleString();
+  const who = d => `${esc(d.job)} · ${esc(d.agent)} · ${esc(when(d))}`;
+  main.innerHTML = `<div class="card"><h2>Review queue</h2>
+    <p class="help">At the Propose level, Hermes's tracker writes wait here until you approve them. Nothing reaches YouTrack before that.</p>
+    ${pending.length ? pending.map(d => `<div class="draft" data-id="${d.id}"><div class="what"><b>${esc(d.summary)}</b><div class="who">${who(d)}</div>
+        ${d.result ? `<div class="err" role="alert">YouTrack said: ${esc(d.result.replace(/^error: /, ''))}</div>` : ''}</div>
+        <button class="primary" data-a="approve" aria-label="Approve: ${esc(d.summary)}">Approve</button><button data-a="reject" aria-label="Reject: ${esc(d.summary)}">Reject</button></div>`).join('')
+      : '<p class="empty">Nothing waiting. At the Propose level, Hermes\'s tracker writes wait here until you approve them.</p>'}
+    <div class="row"><span class="msg" id="qmsg" role="status"></span></div></div>
+    ${past.length ? `<div class="card"><h2>Handled</h2>${past.map(d => `<div class="draft"><div class="what">${esc(d.summary)}<div class="who">${who(d)}</div></div>
+      ${d.state === 'approved' ? `<span>Sent to YouTrack as ${base ? `<a href="${esc(base)}/issue/${esc(d.result)}" target="_blank" rel="noopener">${esc(d.result)}</a>` : esc(d.result)}</span>` : '<span class="pill bad">Rejected</span>'}</div>`).join('')}</div>` : ''}`;
+  main.querySelectorAll('.draft button').forEach(b => b.onclick = async () => {
+    const row = b.closest('.draft'); row.querySelectorAll('button').forEach(x => x.disabled = true);
+    try { await api(`/api/ops/drafts/${row.dataset.id}/${b.dataset.a}`, { method:'POST' }); await queue(); }
+    catch (err) { await queue(); $('#qmsg').className = 'msg err'; $('#qmsg').textContent = err.message; }
+  });
+}
+
 // ---------- Roles ----------
 async function roles() {
-  const [set, m] = await Promise.all([api('/api/admin/settings'), getModels()]);
+  const [set, m, projects] = await Promise.all([api('/api/admin/settings'), getModels(), api('/api/projects')]);
   const all = [...(m.anthropic || []), ...(m.openai || [])];
   const fits = (rt, id) => rt === 'pi' || (rt === 'claude-code' && id.startsWith('anthropic/')) || (rt === 'codex' && id.startsWith('openai/'));
   const opts = (rt, cur) => { const ok = all.filter(id => fits(rt, id)); if (cur && !ok.includes(cur)) ok.unshift(cur); return ok.map(id => `<option ${id === cur ? 'selected' : ''}>${esc(id)}</option>`).join(''); };
@@ -255,7 +283,14 @@ async function roles() {
     <form id="rf"><table><tr><th>Role</th><th>Runtime</th><th>Model</th></tr>
     ${set.role_names.map(r => `<tr><td><b>${r}</b></td><td><select name="${r}.runtime">${['pi', 'claude-code', 'codex'].map(x => `<option ${x === set.roles[r].runtime ? 'selected' : ''}>${x}</option>`).join('')}</select></td>
       <td><select name="${r}.model">${opts(set.roles[r].runtime, set.roles[r].model)}</select></td></tr>`).join('')}</table>
-    <div class="row"><button class="primary">Save roles</button><span class="msg" id="rmsg"></span></div></form></div>`;
+    <div class="row"><button class="primary">Save roles</button><span class="msg" id="rmsg"></span></div></form></div>
+    <div class="card"><h2>Override for a project</h2><p class="help">Give one project its own model for a role, for example a cheaper one for Hermes, the operations agent. Other roles and projects keep the settings above.</p>
+    <form id="pf"><div class="row"><label class="k" for="pp">Project</label><select id="pp">${Object.entries(projects).map(([repo, name]) => `<option value="${esc(repo)}">${esc(name)} (${esc(repo)})</option>`).join('') || '<option value="">No projects yet</option>'}</select></div>
+    <div class="row"><label class="k" for="pr">Role</label><select id="pr">${set.role_names.map(r => `<option ${r === 'ops' ? 'selected' : ''}>${r}</option>`).join('')}</select></div>
+    <div class="row"><label class="k" for="prt">Runtime</label><select id="prt">${['pi', 'claude-code', 'codex'].map(x => `<option>${x}</option>`).join('')}</select></div>
+    <div class="row"><label class="k" for="pm">Model</label><select id="pm">${opts('pi', set.roles.ops.model)}</select></div>
+    <div class="row"><button class="primary">Save override</button><button type="button" id="pclear">Remove override</button><span class="msg" id="pmsg" role="status"></span></div>
+    ${Object.entries(set.projects || {}).map(([repo, p]) => Object.entries(p.roles || {}).map(([r, v]) => `<div class="row"><span class="k">${esc(projects[repo] || repo)}</span><span><b>${esc(r)}</b>: ${esc(v.runtime)}, <span class="mono">${esc(v.model)}</span></span></div>`).join('')).join('')}</form></div>`;
   // switching runtime keeps the role's tier: think, code or execute (D29)
   const TIERS = { think:['anthropic/claude-opus-5-5', 'openai/gpt-6.1-sol'], code:['anthropic/claude-sonnet-5-5', 'openai/gpt-6.1-terra'], execute:['anthropic/claude-haiku-5-5', 'openai/gpt-6-luna'] };
   const tierOf = id => /opus|sol|fable|astra/.test(id) ? 'think' : /haiku|luna|mini|nano/.test(id) ? 'execute' : 'code';
@@ -264,6 +299,17 @@ async function roles() {
     const pick = pair.find(id => fits(s.value, id) && (s.value !== 'pi' || id === ms.value)) || pair.find(id => fits(s.value, id)) || all.find(id => fits(s.value, id));
     ms.innerHTML = opts(s.value, pick);
   });
+  const savePO = async (clear) => {
+    const repo = $('#pp').value, role = $('#pr').value, cur = JSON.parse(JSON.stringify(set.projects || {}));
+    if (!repo) { $('#pmsg').className = 'msg err'; $('#pmsg').textContent = 'Pick a project first.'; return; }
+    cur[repo] ||= { roles:{} }; cur[repo].roles ||= {};
+    if (clear) delete cur[repo].roles[role]; else cur[repo].roles[role] = { runtime:$('#prt').value, model:$('#pm').value };
+    try { await api('/api/admin/settings', { method:'PUT', headers:{ 'content-type':'application/json' }, body:JSON.stringify({ projects:cur, youtrack:{ url:set.youtrack.url, token:'' }, limits:set.limits }) }); await roles(); }
+    catch (err) { $('#pmsg').className = 'msg err'; $('#pmsg').textContent = err.body?.problems ? Object.entries(err.body.problems).map(([k, v]) => k + ': ' + v).join('; ') : err.message; }
+  };
+  $('#prt').onchange = () => { $('#pm').innerHTML = opts($('#prt').value, ''); };
+  $('#pf').onsubmit = e => { e.preventDefault(); savePO(false); };
+  $('#pclear').onclick = () => savePO(true);
   $('#rf').onsubmit = async e => {
     e.preventDefault(); const f = new FormData(e.target), out = {};
     for (const r of set.role_names) out[r] = { runtime:f.get(r + '.runtime'), model:f.get(r + '.model') };
@@ -286,18 +332,18 @@ const CL = { blue:['#1d4e89', '#26406e'], red:['#a63d33', '#7a2e38'], terracotta
   shade:['#cdd5df', '#8e97b4'], stone:['#b9b4a8', '#6f7088'], sand:['#eadcb5', '#a69c86'], ink:['#3d4f6b', '#2a3550'] };
 const CG_COLOR = { solon:CL.blue, herodotus:CL.terracotta, thales:CL.blue, anaximander:CL.olive, eratosthenes:CL.sand, aristotle:CL.red, plato:CL.blue, archimedes:CL.terracotta,
   hero:CL.blue, euclid:CL.olive, pythagoras:CL.marble, socrates:CL.shade, diogenes:CL.stone, zeno:CL.blue, heraclitus:CL.red, protagoras:CL.red, isocrates:CL.marble,
-  xenophon:CL.blue, homer:CL.marble, solomun:CL.ink, you:['#c49a2c', '#9c7d3a'], oracle:['#3d8fd8', '#4a3f7a'] };   // you = bronze, oracle = sky-high
+  xenophon:CL.blue, hermes:CL.blue, homer:CL.marble, solomun:CL.ink, you:['#c49a2c', '#9c7d3a'], oracle:['#3d8fd8', '#4a3f7a'] };   // you = bronze, oracle = sky-high
 const cgColor = (id, dark) => CG_COLOR[id]?.[dark ? 1 : 0] || 'var(--accent)';
-const CG_KIND = { handoff:{ label:'handoff', color:'var(--bar)' }, check:{ label:'check failure sent back', color:'var(--fail)' }, you:{ label:'your message', color:'var(--gold)' } };
+const CG_KIND = { handoff:{ label:'handoff', color:'var(--bar)' }, check:{ label:'check failure sent back', color:'var(--fail)' }, you:{ label:'your message', color:'var(--gold)' }, ops:{ label:'Hermes: request, answer, handover', color:'var(--accent)' } };
 // one edge per (from, to, kind), with the messages behind its count
 function graphData(m) {
   const groups = new Map();
   const add = (a, b, kind, msg, n = 1) => { const k = a + '>' + b + '>' + kind; let g = groups.get(k);
     if (!g) groups.set(k, g = { id:k, a, b, kind, n:0, msgs:[], idx:0 }); g.n += n; if (msg) g.msgs.push(msg); };
   // counts come from the uncapped edges; the (capped) messages are only attached as detail
-  const kindOf = a => a === 'oracle' ? 'check' : a === 'you' ? 'you' : 'handoff';
-  Object.entries(m.edges || {}).forEach(([k, n]) => { const [a, b] = k.split('>'); add(a, b, kindOf(a), null, n); });
-  (m.messages || []).forEach(x => { const g = groups.get(x.from + '>' + x.to + '>' + kindOf(x.from)); if (g) g.msgs.push(x); });
+  const kindOf = (a, b) => a === 'hermes' || b === 'hermes' ? 'ops' : a === 'oracle' ? 'check' : a === 'you' ? 'you' : 'handoff';
+  Object.entries(m.edges || {}).forEach(([k, n]) => { const [a, b] = k.split('>'); add(a, b, kindOf(a, b), null, n); });
+  (m.messages || []).forEach(x => { const g = groups.get(x.from + '>' + x.to + '>' + kindOf(x.from, x.to)); if (g) g.msgs.push(x); });
   const seen = {};
   return [...groups.values()].map(g => { const p = g.a + '>' + g.b; g.idx = seen[p] = (seen[p] ?? -1) + 1; return g; });
 }
@@ -478,7 +524,18 @@ async function metrics() {
     <div class="card"><h2>Time per phase</h2><p class="help">Seconds spent in each state, all jobs together.</p>${bars(Object.entries(m.phase_seconds).map(([k, v]) => ({ k, v, tip:`${v.toFixed(1)} s` })).sort((a, b) => b.v - a.v), v => v.toFixed(1) + ' s')}</div>
     <div class="card"><h2>Tool calls</h2>${bars(Object.entries(m.tools).map(([k, v]) => ({ k, v })).sort((a, b) => b.v - a.v), v => fmt(v))}</div>
   </div>
-  <div class="card"><h2>Who talks to whom</h2><p class="help">Handoffs, check failures sent back, and your messages. Line width shows how often.</p>${graph(m)}</div>
+  <div class="card"><h2>Hermes, the operations agent</h2><p class="help">Tracker calls, tickets, handovers and answers. His cost is under Cost by agent.</p>
+    <div class="tiles">
+      <div class="tile"><div class="v">${fmt(m.ops.calls)}</div><div class="l">Tracker calls</div></div>
+      <div class="tile"><div class="v">${fmt(m.ops.created)}</div><div class="l">Issues created</div></div>
+      <div class="tile"><div class="v">${fmt(m.ops.moved)}</div><div class="l">Board moves</div></div>
+      <div class="tile"><div class="v">${fmt(m.ops.handovers)}</div><div class="l">Handovers</div></div>
+      <div class="tile"><div class="v">${fmt(m.ops.answers)}</div><div class="l">Answers</div></div>
+      <div class="tile"><div class="v">${fmt(m.ops.drafts)}</div><div class="l">Drafts queued</div></div>
+      <div class="tile"><div class="v">${fmt(m.ops.refused)}</div><div class="l">Refused by the guard</div></div>
+      <div class="tile"><div class="v">${usd(m.agents.hermes?.usd)}</div><div class="l">Cost</div></div>
+    </div></div>
+  <div class="card"><h2>Who talks to whom</h2><p class="help">Handoffs, check failures sent back, your messages, and Hermes's requests, answers and handovers. Line width shows how often.</p>${graph(m)}</div>
   <div class="card"><h2>Checks</h2>${Object.keys(m.checks).length ? `<table><tr><th>Command</th><th class="n">Passed</th><th class="n">Failed</th></tr>
     ${Object.entries(m.checks).map(([c, x]) => `<tr><td class="mono">${esc(c)}</td><td class="n">${x.Passed}</td><td class="n">${x.Failed ? `<span class="pill bad">${x.Failed}</span>` : 0}</td></tr>`).join('')}</table>` : '<p class="empty">No checks run yet.</p>'}</div>
   <div class="card"><h2>Jobs</h2>${m.jobs?.length ? `<table><tr><th>Job</th><th>Title</th><th>State</th><th class="n">Cost</th><th class="n">Time</th><th class="n">Requests</th><th class="n">Heal loops</th><th class="n">Handoffs</th></tr>

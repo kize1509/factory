@@ -20,6 +20,7 @@ import (
 	"factory/internal/gateway"
 	"factory/internal/handoff"
 	"factory/internal/job"
+	"factory/internal/ops"
 	"factory/internal/patrol"
 	"factory/internal/runtime"
 	"factory/internal/store"
@@ -35,6 +36,7 @@ type Server struct {
 	Root     string                     // repo root of the factory itself (for pi-host)
 	Started  time.Time
 	Store    *store.Store
+	Ops      *ops.Service // the operations agent's side (Hermes); built in Handler when not set
 
 	mu     sync.Mutex
 	jobs   map[string]*job.Job
@@ -46,6 +48,7 @@ func (s *Server) Handler() http.Handler {
 	if s.jobs == nil {
 		s.jobs = map[string]*job.Job{}
 	}
+	s.startOps()
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/jobs", s.startJob)
 	mux.HandleFunc("GET /api/jobs", s.listJobs)
@@ -63,6 +66,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/tools/{job}/{agent}/{tool}", s.tool)
 	s.adminRoutes(mux)
 	s.passRoutes(mux)
+	s.opsRoutes(mux)
 	mux.HandleFunc("POST /mcp/{job}/{agent}", s.mcp)
 	mux.Handle("/llm/", s.Gateway)
 	mux.HandleFunc("GET /app", s.app)
@@ -195,6 +199,10 @@ func (s *Server) startJob(w http.ResponseWriter, r *http.Request) {
 	}
 	j := job.New(spec, s.Bus, rt)
 	j.SetRuntimes(s.Runtimes)
+	if s.Ops != nil {
+		s.Ops.Register(spec.ID, spec.Repo, spec.Issue, spec.Ship, "", false)
+		j.SetOps(s.Ops)
+	}
 	s.jobs[spec.ID] = j
 	s.claimIsland(j)
 	s.mu.Unlock()
@@ -336,6 +344,16 @@ func (s *Server) message(w http.ResponseWriter, r *http.Request) {
 		Text string `json:"text"`
 	}
 	json.NewDecoder(r.Body).Decode(&body)
+	if r.PathValue("agent") == ops.Hermes && s.Ops != nil && strings.TrimSpace(body.Text) != "" { // you can talk to Hermes like any agent
+		s.Bus.Emit(j.ID, ops.Hermes, "human.message", map[string]any{"text": body.Text})
+		answer, err := s.Ops.Ask(j.ID, "you", body.Text)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		writeJSON(w, map[string]any{"ok": true, "answer": answer})
+		return
+	}
 	if j.Resumable() { // a message to a stuck job is guidance to carry it on
 		s.guide(w, j, body.Text)
 		return
@@ -399,6 +417,14 @@ func (s *Server) resume(w http.ResponseWriter, r *http.Request) {
 func (s *Server) tool(w http.ResponseWriter, r *http.Request) {
 	if p := s.passOf(r.PathValue("job")); p != nil {
 		body, _ := io.ReadAll(r.Body)
+		if text, handled, err := s.opsTool(r.PathValue("job"), r.PathValue("agent"), r.PathValue("tool"), body); handled {
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+				return
+			}
+			fmt.Fprint(w, text)
+			return
+		}
 		text, err := passTool(p, r.PathValue("agent"), r.PathValue("tool"), body)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusUnprocessableEntity)
@@ -423,6 +449,9 @@ func (s *Server) tool(w http.ResponseWriter, r *http.Request) {
 // callTool runs one factory tool for an agent. The engine decides and logs
 // (D2); the reply text goes back to the agent.
 func (s *Server) callTool(j *job.Job, agent, tool string, args []byte) (string, error) {
+	if text, handled, err := s.opsTool(j.ID, agent, tool, args); handled {
+		return text, err
+	}
 	switch tool {
 	case "handoff":
 		var n handoff.Note

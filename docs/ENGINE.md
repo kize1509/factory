@@ -190,6 +190,7 @@ The review step is described in §8. The other roles (research, planning, humani
 | GET | `/api/events?job=<id>` | server-sent events, replays the job's log first |
 | POST | `/api/agents/<job>/<agent>/message` | steer an agent (the UFO) |
 | POST | `/api/agents/<job>/<agent>/stop` | stop an agent |
+| GET | `/api/ops/drafts` | Hermes's drafts waiting for you (`?state=pending`); `POST /api/ops/drafts/<id>/approve` and `/reject` |
 | POST | `/api/tools/<job>/<agent>/<tool>` | factory tools called from inside agents |
 | any | `/llm/<job>/<agent>/<provider>/…` | the metering gateway |
 | GET | `/` | the web interface |
@@ -257,11 +258,26 @@ The code is in `internal/job/symposium.go`. The rules and scoring are in PRD §7
 
 Tested live as DEMO-14 (ParseDuration, all Haiku). Three experiments (hand scanner, regexp, split and table) all passed. The regexp one won with 0.9 and was reviewed, merged and committed for about $0.02.
 
+### 8.6 Operations agent (Hermes)
+
+Role `ops`, default model Terra 6.1 (`openai/gpt-6.1-terra` on the wire), overridable per project in Admin → Roles (`projects` in `settings.json`). Code is in `internal/ops`; the server wires it in `internal/server/ops.go`.
+
+- **Who and when.** One Hermes session per job or pass, started on the first request, reused for later ones (one turn at a time) and stopped when the job or pass ends. It runs as agent `hermes` under the job or pass id, so the gateway bills its cost there. It can read the repo (read, grep, find, ls) but not edit or run shell. Knowledge outlives the session because it lives in the store.
+- **Tools.** Every agent gets `ask_ops(question)` and `report(kind, text, issues)`. Hermes also has `tracker_search`, `tracker_read`, `tracker_create`, `tracker_update`, `tracker_move`, `tracker_comment`, `tracker_link`, `tracker_attach`, `knowledge_search`, and the end-of-turn tools `answer(text, sources)` and `handover(context, decisions, open_points, links)`. There is no delete tool. Tools are declared in three places that must stay in step: `internal/server/mcp.go`, `pi-host/index.mjs` and the dispatch in `internal/server/ops.go`.
+- **Guard.** Every write is typed fields turned into YouTrack commands with quoted values. Agent text is never passed on as a command. Only the project mapped in `factory.yml` (`tracker.project`): searches are sent as `project: P and (<query>)` and results from other projects are dropped; writes and reads check each issue ID. Write events and drafts name the agent whose request Hermes was serving (`from`). Caps: `max_created_per_job` (5) and `max_created_per_pass` (10), counting drafts too. Control level: `tracker.level` for jobs (default `fix`), `level` in `POST /api/passes` (default `observe`). Observe only reads. Propose queues every write as a draft. File writes directly, except state moves and field updates, which are drafts. Fix writes directly. A state move or field change on a ticket the factory didn't create (not Hermes's own, not the job's) is always a draft; comments, tags and links are allowed on any ticket in the project. `ask_ops`, `report` and handovers work at every level.
+- **Review queue.** Drafts are in `ops_drafts`. `GET /api/ops/drafts`, `POST /api/ops/drafts/<id>/approve` and `/reject`. Approving claims the draft once, runs it, and on a YouTrack error leaves it pending with the error.
+- **Board sync.** Plain engine code, no model call. `job.state` moves the job's ticket: planning and building to `states.working`, stuck and waiting to `states.blocked`, reviewing to `states.review`, done to `states.done` (`states.review` in PR mode), plus a comment with the commit or PR. An empty state name means don't move. A failure emits `tracker.skipped` and never touches the job.
+- **Knowledge.** `ops_notes` in `factory.db` (job, tickets, agent, kind, event). The engine adds notes by itself from `handoff.written`, `review.verdict`, `human.message`, `human.guidance` and `human.answered`; agents add more with `report`. `ops_created` remembers the tickets Hermes made.
+- **Handover.** The job asks `Ops.Handover` at planner to builder, builder to reviewer and stuck to resume, and adds the result to the next prompt. With no ops, or on error (`ops.unavailable`), the prompts are unchanged.
+- **Push.** Every 60 seconds the ticket of a running job is checked for new comments (the factory's own, marked `[factory]`, are skipped). A new one is steered into the active agent and emitted as `ops.push`.
+- **Events.** `tracker.search`, `tracker.read`, `tracker.issue.created|updated|moved`, `tracker.comment.added`, `tracker.link.added`, `tracker.attachment.added`, `tracker.draft`, `tracker.draft.approved|rejected`, `tracker.refused`, `tracker.skipped`, `ops.report`, `ops.request`, `ops.answer`, `ops.handover`, `ops.push`. They carry the job and the agents (`from`, `to`). The Metrics tab counts them and draws them in "Who talks to whom".
+- **Not built.** Answering the user from a YouTrack comment. You can message Hermes from the map like any agent. Hermes on Claude Code can't be limited to read-only tools yet (Pi can).
+
 ## 9. Where data lives
 
 | What | Where |
 |---|---|
-| Jobs, every event, prices | `~/.factory/factory.db` (SQLite) |
+| Jobs, every event, prices, Hermes's notes, the review queue | `~/.factory/factory.db` (SQLite) |
 | Settings: wire, roles, skills per role, YouTrack, limits | `~/.factory/settings.json` |
 | Your edits to role prompts | `~/.factory/prompts/<role>.md` |
 | Skills repo copy, per-role Claude plugins | `~/.factory/skills/`, `~/.factory/skillsets/` |

@@ -47,6 +47,32 @@ type Spec struct {
 	Project    string              `json:"project,omitempty"` // the project's readable name, given once by the planner
 }
 
+// Ops is the operations agent as the job sees it: it builds the handover
+// an agent starts from when work moves between agents, and ends its own
+// session with the job. A job without one runs as before.
+type Ops interface {
+	Handover(job, from, to string, n *handoff.Note) (string, error)
+	Close(job string)
+}
+
+// SetOps gives the job its operations agent.
+func (j *Job) SetOps(o Ops) { j.ops = o }
+
+// handover asks the operations agent for the context the next agent starts
+// from. It returns "" when there is no operations agent or it fails: the
+// job then runs on the plain handoff note, as it did before.
+func (j *Job) handover(from, to string, n *handoff.Note) string {
+	if j.ops == nil {
+		return ""
+	}
+	h, err := j.ops.Handover(j.ID, from, to, n)
+	if err != nil {
+		j.emit("", "ops.unavailable", map[string]any{"for": "handover", "from": from, "to": to, "error": err.Error()})
+		return ""
+	}
+	return h
+}
+
 type Job struct {
 	Spec
 	State    string    `json:"state"`           // starting, planning, building, checking, handoff, reviewing, committing, shipping, done; stuck waits for your guidance
@@ -64,6 +90,7 @@ type Job struct {
 	// the job checks it. The test harness records cassettes with it.
 	Tap func(agent, tool string, args any) `json:"-"`
 
+	ops       Ops
 	bus       *events.Bus
 	rt        runtime.Runtime
 	mu        sync.Mutex
@@ -234,6 +261,19 @@ func (j *Job) set(state string) {
 	j.emit("", "job.state", map[string]any{"state": state})
 }
 
+// Active returns the agent that is working now: the reviewer while the job
+// is in review, the lead builder otherwise. New ticket comments go to it.
+func (j *Job) Active() runtime.Agent {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.State == "reviewing" {
+		if r := j.agents[reviewer]; r != nil {
+			return r
+		}
+	}
+	return j.agents[j.lead]
+}
+
 // Agent returns a running agent of this job, for steering and stopping.
 func (j *Job) Agent(id string) runtime.Agent {
 	j.mu.Lock()
@@ -370,6 +410,9 @@ func (j *Job) Run(parent context.Context) {
 			break
 		}
 	}
+	if j.ops != nil {
+		j.ops.Close(j.ID)
+	}
 	j.mu.Lock()
 	j.alive = false
 	cancelled := j.cancelled && j.State != "done"
@@ -478,6 +521,9 @@ func (j *Job) run(ctx context.Context) (*workspace.Worktree, error) {
 		}
 		if plan != nil {
 			task += "\n\nThe planner's handoff for you:\n" + string(mustJSON(plan))
+			if h := j.handover(plan.From, builder, plan); h != "" {
+				task += "\n\n" + h
+			}
 		}
 		if !j.symposiumDone {
 			task += "\n\nIf the task turns out harder than it looks (several workable approaches and no clear best, or a vague ticket), call propose_experiments instead of guessing: the engine then tries the approaches side by side."
@@ -737,6 +783,9 @@ func (j *Job) review(ctx context.Context, wt *workspace.Worktree, round int) (*V
 		task = fmt.Sprintf("Review round %d for ticket %s: %s\n\nThe task:\n%s\n\nChecks that passed: %s\n\nThe builder's handoff note:\n%s\n\nThe diff:\n```diff\n%s\n```\n\n"+
 			"Grill the builder on the decisions that matter with the ask_builder tool, one question at a time (at most %d), the way the grilling skill describes, then call verdict.",
 			round, j.ID, j.Title, j.Prompt, strings.Join(j.Checks, ", "), mustJSON(note), diff, maxAsks)
+		if h := j.handover(j.lead, reviewer, note); h != "" {
+			task += "\n\n" + h
+		}
 	} else {
 		task = fmt.Sprintf("Review round %d. The builder says it fixed your findings and the checks pass again. The diff now:\n```diff\n%s\n```\n\nAsk what you still need with ask_builder (at most %d), then call verdict.", round, diff, maxAsks)
 	}

@@ -1500,6 +1500,7 @@ const LIVE_AT = { starting:'gates', planning:'academy', symposium:'symposium', g
 const pageStart = Date.now();
 const BUILDER = 'archimedes', REVIEWER = 'socrates', PLANNER = 'aristotle', GRADER = 'zeno';
 
+const short_ = t => { t = String(t || '').split('\n')[0]; return t.length > 140 ? t.slice(0, 139) + '…' : t; };
 function liveSetup(j) {
   const L = j.live, at = LIVE_AT[L.state];
   const st = L.state === 'failed' || L.state === 'interrupted' ? 'failed' : L.state === 'waiting' || L.state === 'stuck' ? 'blocked' : L.state === 'checking' ? 'waiting' : L.thinking ? 'thinking' : 'tool';
@@ -1513,7 +1514,7 @@ function liveSetup(j) {
   if (L.state === 'symposium' || L.state === 'grading') bldg.symposium = 'active';
   const lead = L.lead || BUILDER, ag = id => L.ag?.[id] || {};
   const exps = Object.entries(L.exps || {}).filter(([, x]) => !x.gone);
-  const agentsHere = L.shipping ? [[lead, 'harbour', 'tool', 'Sailing with the commit']]
+  let agentsHere = L.shipping ? [[lead, 'harbour', 'tool', 'Sailing with the commit']]
     : L.state === 'done' || L.state === 'cancelled' ? []
     : L.state === 'planning' ? [[PLANNER, 'academy', ag(PLANNER).thinking ? 'thinking' : 'tool', ag(PLANNER).msg || 'Exploring the code']]
     // the Symposium: one builder per hypothesis in the banquet hall, the grader with them
@@ -1523,6 +1524,9 @@ function liveSetup(j) {
     // in review the builder stands with Socrates at the Areopagus and answers his questions
     : L.state === 'reviewing' ? [[REVIEWER, 'areopagus', L.rthinking ? 'thinking' : 'tool', L.rmsg || 'Reading the work'], [lead, 'areopagus', L.grilled ? 'tool' : 'waiting', L.msg || 'Waiting for questions']]
     : [[lead, at, st, L.msg || '']];
+  // Hermes shows up next to the agent that asked him something or is getting a handover
+  if (L.hermes && Date.now() < L.hermes.until) { const near = agentsHere.find(a => a[0] === L.hermes.who) || agentsHere[0];
+    if (near) agentsHere = [...agentsHere, ['hermes', near[1], 'tool', L.hermes.msg]]; }
   SETUPS['live:' + j.id] = { label:L.shipping ? 'Ship' : LIVE_LABEL[L.state] || L.state, desc:'', bldg, agents:agentsHere, ship:!!L.shipping, shipBy:lead,
     at:{ checking:'oracle', building:'workshop', handoff:'workshop', committing:'harbour', shipping:'harbour', starting:'gates', reviewing:'areopagus', planning:'academy', symposium:'academy', grading:'academy' }[L.state] };
   return 'live:' + j.id;
@@ -1613,6 +1617,11 @@ function onEvent(j, e) {
     case 'symposium.winner': L.lead = e.agent; for (const [id, x] of Object.entries(L.exps || {})) if (id !== e.agent) x.gone = true;
       say(`${who[e.agent]?.Name || e.agent}'s approach "${d.name}" wins with ${d.score.toFixed(2)}. Its branch goes forward; the others are archived.`); refresh(j, true); return;
     case 'symposium.merged': say(`The winning branch ${d.from} is merged into ${d.into}.`); break;
+    case 'ops.request': L.hermes = { who:e.agent, msg:d.question, until:Date.now() + 120000 }; say(`${who[e.agent]?.Name || e.agent} asks Hermes: "${short_(d.question)}"`); refresh(j, true); speak('hermes', d.question); return;
+    case 'ops.handover': L.hermes = { who:d.to, msg:'Handover for ' + (who[d.to]?.Name || d.to), until:Date.now() + 8000 }; say(`Hermes carries a handover from ${who[d.from]?.Name || d.from} to ${who[d.to]?.Name || d.to}.`); refresh(j, true);
+      if (!old) setTimeout(() => refresh(j, true), 8200); return;
+    case 'ops.answer': L.hermes = { who:d.to, msg:String(d.answer || '').split('\n')[0].slice(0, 160), until:Date.now() + 4000 }; say(`Hermes answers ${who[d.to]?.Name || d.to}: ${short_(d.answer)}`); refresh(j, true);
+      if (!old) setTimeout(() => refresh(j, true), 4200); return;
     case 'review.question': L.grilled = true; L.rmsg = 'Asking Archimedes'; L.msg = 'Answering Socrates';
       think('I asked Archimedes: ' + d.question, '', REVIEWER); think('Socrates asks: ' + d.question, 'heard', BUILDER);
       say(`Socrates grills Archimedes at the Areopagus: "${d.question.length > 160 ? d.question.slice(0, 159) + '…' : d.question}"`); refresh(j, false); speak(REVIEWER, d.question); return;

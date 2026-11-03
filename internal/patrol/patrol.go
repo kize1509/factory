@@ -126,6 +126,7 @@ type Pass struct {
 	Budget     Budget
 	Agent      Agent
 	Store      *store.Store
+	Level      string // control level for the operations agent: observe, propose, file or fix
 
 	mu       sync.Mutex
 	state    string

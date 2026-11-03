@@ -264,6 +264,9 @@ func (j *Job) carryOn(ctx context.Context, wt *workspace.Worktree, r *Resume) (*
 			"Read the files changed so far before you change anything.\n\nThe person running the factory says, most recently:\n\n%s\n\n"+
 			"Follow that and finish the task. Scratch folder for logs and notes: %s\nWhen you're done, write your handoff with the handoff tool.",
 			work.Path, guidance, filepath.Join(j.Dir(), "scratch"))
+		if h := j.handover("the stuck job", lead, nil); h != "" {
+			msg += "\n\n" + h
+		}
 	}
 	if _, err := j.ask(ctx, a, msg); err != nil {
 		return work, a, false, fmt.Errorf("builder: %w", err)
