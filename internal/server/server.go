@@ -20,6 +20,7 @@ import (
 	"factory/internal/gateway"
 	"factory/internal/handoff"
 	"factory/internal/job"
+	"factory/internal/patrol"
 	"factory/internal/runtime"
 	"factory/internal/store"
 	"factory/internal/youtrack"
@@ -35,9 +36,10 @@ type Server struct {
 	Started  time.Time
 	Store    *store.Store
 
-	mu   sync.Mutex
-	jobs map[string]*job.Job
-	n    int
+	mu     sync.Mutex
+	jobs   map[string]*job.Job
+	passes map[string]*patrol.Pass
+	n      int
 }
 
 func (s *Server) Handler() http.Handler {
@@ -60,6 +62,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/agents/{job}/{agent}/resume", s.resume)
 	mux.HandleFunc("POST /api/tools/{job}/{agent}/{tool}", s.tool)
 	s.adminRoutes(mux)
+	s.passRoutes(mux)
 	mux.HandleFunc("POST /mcp/{job}/{agent}", s.mcp)
 	mux.Handle("/llm/", s.Gateway)
 	mux.HandleFunc("GET /app", s.app)
@@ -394,6 +397,16 @@ func (s *Server) resume(w http.ResponseWriter, r *http.Request) {
 
 // tool handles the factory tools Pi agents call over HTTP.
 func (s *Server) tool(w http.ResponseWriter, r *http.Request) {
+	if p := s.passOf(r.PathValue("job")); p != nil {
+		body, _ := io.ReadAll(r.Body)
+		text, err := passTool(p, r.PathValue("agent"), r.PathValue("tool"), body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+			return
+		}
+		fmt.Fprint(w, text)
+		return
+	}
 	j := s.job(w, r.PathValue("job"))
 	if j == nil {
 		return

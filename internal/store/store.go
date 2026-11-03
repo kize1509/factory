@@ -48,6 +48,44 @@ CREATE TABLE IF NOT EXISTS projects (
   repo  TEXT PRIMARY KEY,          -- the repository's path
   name  TEXT NOT NULL              -- its readable name, given by the planner
 );
+CREATE TABLE IF NOT EXISTS runs (
+  id         TEXT PRIMARY KEY,     -- the run folder's name under .factory/runs
+  repo       TEXT,                 -- the project's repo path
+  setup      TEXT,                 -- model, runtime, prompt version, strategy
+  commit_sha TEXT,
+  kind       TEXT,                 -- job, scenario, static, tests
+  feature    TEXT,
+  technique  TEXT,
+  pass       INTEGER NOT NULL,
+  wall_ms    REAL,
+  cost_usd   REAL,
+  dir        TEXT,                 -- the run folder
+  created    TEXT
+);
+CREATE INDEX IF NOT EXISTS runs_cell ON runs(feature, technique, commit_sha);
+CREATE TABLE IF NOT EXISTS passes (
+  id      TEXT PRIMARY KEY,
+  project TEXT,
+  state   TEXT,                    -- running, done, stopped, budget
+  summary TEXT,                    -- JSON
+  started TEXT,
+  ended   TEXT
+);
+CREATE TABLE IF NOT EXISTS ledger (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  pass       TEXT NOT NULL,
+  repo       TEXT,                 -- the project's repo path: feature ids repeat across projects
+  feature    TEXT NOT NULL,
+  technique  TEXT NOT NULL,
+  agent      TEXT,
+  commit_sha TEXT,
+  run        TEXT NOT NULL,        -- the run folder: where result.json and the evidence are
+  verdict    TEXT NOT NULL,        -- ok, finding, blocked
+  note       TEXT,
+  created    TEXT
+);
+CREATE INDEX IF NOT EXISTS ledger_pass ON ledger(pass, id);
+CREATE INDEX IF NOT EXISTS ledger_repo ON ledger(repo, feature, technique);
 CREATE TABLE IF NOT EXISTS prices (
   model       TEXT PRIMARY KEY,    -- provider/id, e.g. anthropic/claude-sonnet-5-5
   input       REAL NOT NULL,       -- US dollars per million tokens

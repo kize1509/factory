@@ -14,8 +14,8 @@ import (
 // testCmd runs `factory test <verb>` and returns the exit code: 0 when the
 // result passes, 1 when it fails, 2 for a usage or read error.
 func testCmd(args []string) int {
-	if len(args) < 1 || (args[0] != "replay" && args[0] != "results") {
-		fmt.Fprintln(os.Stderr, "usage: factory test replay <run> [--repo R --at COMMIT] [--json] | factory test results <run> [--json]")
+	if len(args) < 1 || (args[0] != "replay" && args[0] != "results" && args[0] != "check") {
+		fmt.Fprintln(os.Stderr, "usage: factory test replay <run> [--repo R --at COMMIT] [--json] | factory test results <run> [--json] | factory test check <repo> --feature F --technique static|tests [--commit C] [--cmd C] [--json]")
 		return 2
 	}
 	verb := args[0]
@@ -24,6 +24,11 @@ func testCmd(args []string) int {
 	root := fs.String("root", ".", "the project folder that holds .factory/runs")
 	repo := fs.String("repo", "", "replay: a git repo to replay on instead of the run's fixture")
 	at := fs.String("at", "", "replay: the commit of --repo to replay at")
+	feature := fs.String("feature", "", "check: the feature map entry")
+	technique := fs.String("technique", "", "check: static or tests")
+	commit := fs.String("commit", "", "check: the commit to check (default HEAD)")
+	var cmds multi
+	fs.Var(&cmds, "cmd", "check: a command to run instead of the technique's default (repeatable)")
 	// the run id comes first, flags after it (or flags only before it)
 	if err := fs.Parse(args[1:]); err != nil {
 		return 2
@@ -36,14 +41,17 @@ func testCmd(args []string) int {
 		rest = rest[:1]
 	}
 	if len(rest) != 1 {
-		fmt.Fprintln(os.Stderr, "need exactly one run id")
+		fmt.Fprintln(os.Stderr, "need exactly one run id (check: one repo)")
 		return 2
 	}
 	var res *harness.Result
 	var err error
-	if verb == "replay" {
+	switch verb {
+	case "check":
+		res, err = harness.Check(context.Background(), *root, rest[0], *feature, *technique, harness.CheckOptions{Commit: *commit, Commands: cmds})
+	case "replay":
 		res, err = harness.Replay(context.Background(), *root, rest[0], harness.ReplayOptions{Repo: *repo, At: *at})
-	} else {
+	default:
 		res, err = harness.Results(*root, rest[0])
 	}
 	if err != nil {
@@ -80,5 +88,11 @@ func printResult(r *harness.Result) {
 	}
 	fmt.Printf("\nreplay: %s\n", r.ReplayCmd)
 }
+
+// multi is a flag that can be given more than once.
+type multi []string
+
+func (m *multi) String() string     { return strings.Join(*m, "; ") }
+func (m *multi) Set(v string) error { *m = append(*m, v); return nil }
 
 func indent(s string) string { return strings.ReplaceAll(s, "\n", "\n    ") }

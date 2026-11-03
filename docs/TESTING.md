@@ -2,7 +2,7 @@
 
 Status: design, with the first slice built (cassettes at the Agent seam). Ticket HF-3.
 
-Two goals drive everything here, and HF-8's patrol agents are the main user:
+Two goals drive everything here, and HF-8's patrol agents are the main user (see [PATROL.md](PATROL.md): every patrol check is a run folder of this harness):
 
 1. **Find bugs.** Start an app, run realistic scenarios, get pass or fail with evidence. A failure is already a bug report.
 2. **Measure performance.** Both the app (speed, resources) and the factory (quality, cost, time, how often a human steps in), compared across setups and over time.
@@ -144,6 +144,8 @@ Bisecting with it: `factory test replay <run> --at <commit>` for a range of comm
 
 ## Subtasks
 
+Passes (PATROL.md) depend on: **3.2** (the run folder and `Result`, now with `kind`, `feature`, `technique`, `commit`; *built*), **3.14** (`factory test check`, *built* for static and tests), **3.9** (the `runs` table and `wall_ms`/`cost_usd` per check, *started*: runs and ledger tables exist, baselines do not), then **3.3** bring-up and **3.4** browser evidence for the explore technique, **3.6** scenarios, **3.11** seeded-bug evals (`testdata/fixtures/seeded` is the first seeded fixture). **3.1** replay serves bisecting a finding.
+
 Order matters: Part 1 first, since HF-8 and the e2e tests both depend on it.
 
 1. **HF-3.1 Cassettes at the Agent seam** (this branch): `record`, `replay`, `fixture`, job e2e on the `hello` fixture, failure paths. *Done.*
@@ -159,4 +161,4 @@ Order matters: Part 1 first, since HF-8 and the e2e tests both depend on it.
 11. **HF-3.11 Bug-finding evals:** seeded-bug fixtures, patrol scoring (recall, false positives, duplicates, cost).
 12. **HF-3.12 Real bugs become tasks:** the close-ticket hook.
 13. **HF-3.13 Comparison runner:** `Compare`, spread reporting, CLI; decide on Symposium reuse.
-14. **HF-3.14 `factory test` CLI and HF-8 interface docs:** wire the verbs above to the functions, JSON output. *Partly done:* `factory test replay|results <run> [--root D] [--repo R --at C] [--json]` (exit 0 pass, 1 fail, 2 error). `up`, `down`, `run`, `metrics`, `compare` are still to build.
+14. **HF-3.14 `factory test` CLI and HF-8 interface docs:** wire the verbs above to the functions, JSON output. *Partly done:* `factory test replay|results <run> [--root D] [--repo R --at C] [--json]` (exit 0 pass, 1 fail, 2 error). `factory test check <repo> --feature F --technique static|tests [--commit C] [--cmd C] [--json]` is built for patrols. `up`, `down`, `run`, `metrics`, `compare` are still to build.

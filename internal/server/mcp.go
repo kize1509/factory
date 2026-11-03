@@ -69,6 +69,12 @@ var mcpTools = []map[string]any{
 		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"title": str_(), "project": str_()}, "required": []string{"title"}},
 	},
 	{
+		"name": "record_check",
+		"description": "Patrol agents only: after `factory test check`, record what you make of the run. run is the run id from its JSON, " +
+			"verdict is ok, finding or blocked (a failed run is a finding), note is one line.",
+		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"run": str_(), "verdict": str_(), "note": str_()}, "required": []string{"run", "verdict"}},
+	},
+	{
 		"name":        "set_status",
 		"description": "Say in a few words what you are doing now. Shown above your head on the map.",
 		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"step": str_()}, "required": []string{"step"}},
@@ -122,6 +128,15 @@ func (s *Server) mcp(w http.ResponseWriter, r *http.Request) {
 			Arguments json.RawMessage `json:"arguments"`
 		}
 		json.Unmarshal(req.Params, &p)
+		if ps := s.passOf(r.PathValue("job")); ps != nil {
+			text, err := passTool(ps, r.PathValue("agent"), p.Name, p.Arguments)
+			if err != nil {
+				reply(toolResult(err.Error(), true))
+				return
+			}
+			reply(toolResult(text, false))
+			return
+		}
 		s.mu.Lock()
 		j := s.jobs[r.PathValue("job")]
 		s.mu.Unlock()
