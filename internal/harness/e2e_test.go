@@ -59,9 +59,6 @@ func (a *scriptedAgent) Prompt(_ context.Context, text string) (string, error) {
 func (a *scriptedAgent) Steer(string) error { return nil }
 func (a *scriptedAgent) Stop() error        { return nil }
 
-// late lets the job be built before the runtime that needs the job.
-type late struct{ runtime.Runtime }
-
 func write(s step, file, body string) { os.WriteFile(filepath.Join(s.cwd, file), []byte(body), 0o644) }
 
 func planner(s step) string {
@@ -142,65 +139,29 @@ func git(t *testing.T, dir string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// run puts the fixture repo through one whole job with the runtime mk
-// builds. A job that gets stuck waits for guidance, so the run is cancelled
-// as soon as it says so.
+// run puts the fixture repo through one whole job with the runtime mk builds.
 func run(t *testing.T, sp job.Spec, mk func(j *job.Job, bus *events.Bus) runtime.Runtime) result {
 	t.Helper()
 	sp.Repo = fixture.New(t, "hello")
-	bus := events.NewBus(t.TempDir())
-	rt := &late{}
-	j := job.New(sp, bus, rt)
-	bus.Place(j.ID, j.Dir())
-	rt.Runtime = mk(j, bus)
+	return fromOutcome(t, sp.Repo, mk, sp)
+}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	ch, unsub := bus.Subscribe(j.ID)
-	defer unsub()
-	go func() {
-		for e := range ch {
-			if e.Type == "job.stuck" {
-				cancel()
-				return
-			}
-		}
-	}()
-	start := time.Now()
-	j.Run(ctx)
-	d := time.Since(start)
-
-	r := result{job: j, repo: sp.Repo, dir: j.Dir(), duration: d}
-	evs, _ := bus.Replay(j.ID)
-	for _, e := range evs {
-		r.types = append(r.types, e.Type)
+func fromOutcome(t *testing.T, repo string, mk func(j *job.Job, bus *events.Bus) runtime.Runtime, sp job.Spec) result {
+	o, err := Execute(context.Background(), sp, RunOptions{Timeout: ScriptedTimeout}, mk)
+	if err != nil {
+		t.Fatal(err)
 	}
-	r.tree, _ = record.Snapshot(j.Worktree)
-	if j.Commit != "" {
-		r.branch = git(t, sp.Repo, "rev-parse", j.Branch+"^{tree}")
-	}
-	b, _ := os.ReadFile(filepath.Join(j.Dir(), "handoff", "archimedes.json"))
-	r.note = string(b)
-	return r
+	return result{job: o.Job, repo: repo, types: o.Final.Types, tree: o.Final.Tree, branch: o.Final.Branch, note: o.Final.Note, dir: o.Job.Dir(), duration: o.Duration}
 }
 
 func recording(script map[string]func(step) string) func(*job.Job, *events.Bus) runtime.Runtime {
-	return func(j *job.Job, bus *events.Bus) runtime.Runtime {
-		rec := record.New(&scripted{job: j, bus: bus, script: script, turns: map[string]int{}}, bus, j.Dir())
-		rec.Attach(j)
-		return rec
-	}
+	return Recording(func(j *job.Job, bus *events.Bus) runtime.Runtime {
+		return &scripted{job: j, bus: bus, script: script, turns: map[string]int{}}
+	})
 }
 
 func replaying(root string, out **replay.Runtime) func(*job.Job, *events.Bus) runtime.Runtime {
-	return func(j *job.Job, bus *events.Bus) runtime.Runtime {
-		rp := replay.New(root, bus)
-		rp.Bind(j)
-		if out != nil {
-			*out = rp
-		}
-		return rp
-	}
+	return Replaying(root, out)
 }
 
 // same checks that a replay reproduced a recording.
@@ -352,5 +313,120 @@ func TestCassetteHoldsTheTurn(t *testing.T) {
 	}
 	if len(turns[1].StartEvents) != 0 {
 		t.Errorf("turn 2 has no Start of its own: %+v", turns[1].StartEvents)
+	}
+}
+
+// A recorded run leaves a run folder whose evidence exists; results reads it;
+// replay passes on it, and fails with the drift when a prompt has changed.
+func TestRunFolderResultsAndReplay(t *testing.T) {
+	root := t.TempDir()
+	if r := os.Getenv("FACTORY_RUNS_ROOT"); r != "" { // keep the run folder for the CLI to read
+		root = r
+	}
+	sp := spec("write done into app.txt")
+	sp.Repo = fixture.New(t, "hello")
+	_, res, err := Record(context.Background(), root, "run-1", sp, "hello", RunOptions{Timeout: ScriptedTimeout}, func(j *job.Job, bus *events.Bus) runtime.Runtime {
+		return &scripted{job: j, bus: bus, script: healing, turns: map[string]int{}}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Pass || res.Metrics["heal_loops"] != 1 {
+		t.Fatalf("recorded result: %+v", res)
+	}
+	got, err := Results(root, "run-1")
+	if err != nil || !got.Pass || got.Run != "run-1" {
+		t.Fatalf("results: %+v, %v", got, err)
+	}
+	dir := RunDir(root, "run-1")
+	for _, p := range []string{got.Evidence.Events, got.Evidence.Cassette, got.Evidence.Handoff, "meta.json"} {
+		if p == "" || filepath.IsAbs(p) {
+			t.Errorf("evidence path %q should be set and relative", p)
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(dir, p)); err != nil {
+			t.Errorf("evidence %s does not exist", p)
+		}
+	}
+
+	rep, err := Replay(context.Background(), root, "run-1", ReplayOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rep.Pass || rep.Failure != nil {
+		t.Fatalf("replay should pass: %+v", rep.Failure)
+	}
+	if _, err := os.Stat(filepath.Join(dir, rep.Evidence.Events)); err != nil {
+		t.Errorf("replay events missing: %v", err)
+	}
+
+	// change a prompt the engine sends (the ticket prompt in the recorded spec)
+	var meta Meta
+	b, _ := os.ReadFile(filepath.Join(dir, "meta.json"))
+	defer os.WriteFile(filepath.Join(dir, "meta.json"), b, 0o644) // leave the run as recorded
+	json.Unmarshal(b, &meta)
+	meta.Spec.Prompt = "write finished into app.txt"
+	if err := writeJSON(filepath.Join(dir, "meta.json"), meta); err != nil {
+		t.Fatal(err)
+	}
+	rep, err = Replay(context.Background(), root, "run-1", ReplayOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Pass || rep.Failure == nil {
+		t.Fatalf("replay should fail on drift: %+v", rep)
+	}
+	for _, want := range []string{"aristotle", "- write done into app.txt", "+ write finished into app.txt"} {
+		if !strings.Contains(rep.Failure.Step+rep.Failure.Actual, want) {
+			t.Errorf("failure lacks %q: %+v", want, rep.Failure)
+		}
+	}
+}
+
+// A fixture that changed since the recording is named as the cause, first.
+func TestReplayNamesAChangedFixture(t *testing.T) {
+	root := t.TempDir()
+	sp := spec("write done into app.txt")
+	sp.Repo = fixture.New(t, "hello")
+	if _, _, err := Record(context.Background(), root, "run-1", sp, "hello", RunOptions{Timeout: ScriptedTimeout}, func(j *job.Job, bus *events.Bus) runtime.Runtime {
+		return &scripted{job: j, bus: bus, script: healing, turns: map[string]int{}}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// pretend the fixture was different when recorded
+	dir := RunDir(root, "run-1")
+	var meta Meta
+	b, _ := os.ReadFile(filepath.Join(dir, "meta.json"))
+	json.Unmarshal(b, &meta)
+	meta.Base = "0000000000000000000000000000000000000000"
+	writeJSON(filepath.Join(dir, "meta.json"), meta)
+	rep, err := Replay(context.Background(), root, "run-1", ReplayOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Pass || rep.Steps[0].Name != "repo commit matches the recording" || rep.Steps[0].Pass {
+		t.Fatalf("first step should be the failed commit check: %+v", rep.Steps)
+	}
+	if rep.Failure.Step != "repo commit matches the recording" || !strings.Contains(rep.Failure.Actual, "fixture hello changed") {
+		t.Errorf("failure: %+v", rep.Failure)
+	}
+	if len(rep.Steps) < 3 { // the cassette still ran
+		t.Errorf("cassette should still run: %+v", rep.Steps)
+	}
+}
+
+// A deadline that ends the job is reported as a timeout, not a stuck job.
+func TestRecordReportsATimeout(t *testing.T) {
+	sp := spec("write done into app.txt")
+	sp.Repo = fixture.New(t, "hello")
+	slow := map[string]func(step) string{"aristotle": func(s step) string { time.Sleep(2 * time.Second); return planner(s) }}
+	_, res, err := Record(context.Background(), t.TempDir(), "slow", sp, "hello", RunOptions{Timeout: 300 * time.Millisecond}, func(j *job.Job, bus *events.Bus) runtime.Runtime {
+		return &scripted{job: j, bus: bus, script: slow, turns: map[string]int{}}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Pass || res.Failure == nil || res.Failure.Step != "job finishes in time" || !strings.Contains(res.Failure.Actual, "timed out after 300ms") {
+		t.Fatalf("result: %+v", res)
 	}
 }

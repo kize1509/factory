@@ -45,6 +45,10 @@ Known limits of this first slice:
 
 ## Part 1: run and reproduce
 
+**Run folder (built).** `harness.Record` runs a job on a fixture with a recording runtime and leaves `<root>/.factory/runs/<run>/`: `events.jsonl`, `cassette/`, `handoff/`, `logs/resume.md` for a stuck job, `meta.json` (the job spec as it started, the fixture, the base commit, and where the job ended: state, title, event types, worktree tree, branch tree, handoff note) and `result.json`. Evidence paths in `result.json` are relative to the folder. The caller passes the job timeout (`RunOptions.Timeout`; zero is no limit, `ScriptedTimeout` is 30s for scripted tests). A deadline that ends a run is its own failure, "job finishes in time", and the cassette is cut off there. `Metrics` fills `metrics` from the events: `heal_loops` (`checks.failed`), `wall_ms`, and `cost_usd`, tokens and `model_calls` when `usage` events exist.
+
+`harness.Replay(ctx, root, run, ReplayOptions{Repo, At})` rebuilds the job from `meta.json` on the run's fixture (or a clone of `Repo` at commit `At`), plays the cassette against the current engine, and compares with what was recorded. `pass` means no prompt drift and the same state, title, event types, trees, handoff note, with every recorded turn played. The first step checks that the rebuilt repo's commit equals `meta.Base` (reported only, not failed, with `--repo`/`--at`), so a changed fixture is named as the cause. The first failing step becomes `failure`; for drift it carries the line diff. The replay's own result and events go to `<run>/replay/`. Replaying on a different repo usually drifts, because prompts carry repo content; that is a signal, not a bug in replay.
+
 **Bring-up.** `harness.Up(project, opts)` (CLI: `factory test up <project>`) does:
 
 1. make a clean copy of the project at a known commit (fixtures come from `testdata/fixtures/<name>/`, or a repo URL plus commit);
@@ -143,7 +147,7 @@ Bisecting with it: `factory test replay <run> --at <commit>` for a range of comm
 Order matters: Part 1 first, since HF-8 and the e2e tests both depend on it.
 
 1. **HF-3.1 Cassettes at the Agent seam** (this branch): `record`, `replay`, `fixture`, job e2e on the `hello` fixture, failure paths. *Done.*
-2. **HF-3.2 Evidence folder and `Result` type:** `.factory/runs/<run>/`, `result.json`, copying events and cassette in, one place that builds it.
+2. **HF-3.2 Evidence folder and `Result` type:** `.factory/runs/<run>/`, `result.json`, copying events and cassette in, one place that builds it. *Done* (`internal/harness/run.go`: `Record`, `Replay`, `Results`, `Metrics`; the e2e test writes a run folder). Browser, container and app evidence wait for HF-3.3 and HF-3.4.
 3. **HF-3.3 Bring-up:** `Up` / `Down`, e2e container from PRD §11, fixture seeding, free ports, health wait. CLI `factory test up|down`.
 4. **HF-3.4 Browser evidence:** Playwright runner with screenshots, video, console and network errors, linked from `Result`.
 5. **HF-3.5 More job e2e:** review rounds, budget limit, pause, early stop, Symposium, ticket update; record `ask_human` answers as cassette entries.
@@ -155,4 +159,4 @@ Order matters: Part 1 first, since HF-8 and the e2e tests both depend on it.
 11. **HF-3.11 Bug-finding evals:** seeded-bug fixtures, patrol scoring (recall, false positives, duplicates, cost).
 12. **HF-3.12 Real bugs become tasks:** the close-ticket hook.
 13. **HF-3.13 Comparison runner:** `Compare`, spread reporting, CLI; decide on Symposium reuse.
-14. **HF-3.14 `factory test` CLI and HF-8 interface docs:** wire the verbs above to the functions, JSON output.
+14. **HF-3.14 `factory test` CLI and HF-8 interface docs:** wire the verbs above to the functions, JSON output. *Partly done:* `factory test replay|results <run> [--root D] [--repo R --at C] [--json]` (exit 0 pass, 1 fail, 2 error). `up`, `down`, `run`, `metrics`, `compare` are still to build.
