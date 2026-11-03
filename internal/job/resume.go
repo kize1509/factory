@@ -274,6 +274,7 @@ func (j *Job) carryOn(ctx context.Context, wt *workspace.Worktree, r *Resume) (*
 // Name records a readable title for the job (and, the first time, for the
 // project), given by the planner.
 func (j *Job) Name(agent, title, project string) error {
+	j.tap(agent, "name_job", map[string]any{"title": title, "project": project})
 	title = strings.TrimSpace(title)
 	if title == "" {
 		return fmt.Errorf("give the job a title")

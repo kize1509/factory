@@ -73,6 +73,7 @@ func (j *Job) complexReason() string {
 // ProposeExperiments is how a planner (or a builder who finds the task is
 // harder than it looked) asks for a Symposium.
 func (j *Job) ProposeExperiments(from string, p Proposal) error {
+	j.tap(from, "propose_experiments", p)
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	if j.inExperiment[from] {
@@ -97,6 +98,7 @@ func (j *Job) ProposeExperiments(from string, p Proposal) error {
 // Grade records the grader's score for one experiment, known to it only by
 // its label (A, B, C…), so it can't favour a builder.
 func (j *Job) Grade(from, label string, score int, reason string) error {
+	j.tap(from, "grade", map[string]any{"label": label, "score": score, "reason": reason})
 	if from != grader {
 		return fmt.Errorf("only the grader grades experiments")
 	}

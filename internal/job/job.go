@@ -59,6 +59,11 @@ type Job struct {
 	Worktree string    `json:"worktree,omitempty"`
 	Island   int       `json:"island"` // the job's cell on the Aegean map, set once when it starts; -1 for none
 
+	// Tap, when set, sees every agent tool call (handoff, set_checks, verdict,
+	// name_job, ask_builder, propose_experiments, grade) as it arrives, before
+	// the job checks it. The test harness records cassettes with it.
+	Tap func(agent, tool string, args any) `json:"-"`
+
 	bus       *events.Bus
 	rt        runtime.Runtime
 	mu        sync.Mutex
@@ -146,6 +151,7 @@ func (j *Job) rtFor(name string) runtime.Runtime {
 // AskBuilder passes a reviewer's question to the builder and returns its
 // answer: the reviewer grills the builder on its decisions.
 func (j *Job) AskBuilder(from, question string) (string, error) {
+	j.tap(from, "ask_builder", map[string]any{"question": question})
 	j.mu.Lock()
 	b, ctx := j.agents[j.lead], j.ctx
 	if from != reviewer {
@@ -173,6 +179,7 @@ func (j *Job) AskBuilder(from, question string) (string, error) {
 
 // SetVerdict records the reviewer's decision for this round.
 func (j *Job) SetVerdict(from string, v Verdict) error {
+	j.tap(from, "verdict", v)
 	if from != reviewer {
 		return fmt.Errorf("only the reviewer gives a verdict")
 	}
@@ -211,6 +218,13 @@ func (j *Job) Shipped() (state, pr, commit, branch string) {
 
 func (j *Job) Dir() string { return filepath.Join(j.Repo, ".factory", "jobs", j.ID) }
 
+// tap reports a tool call to Tap, if one is set.
+func (j *Job) tap(agent, tool string, args any) {
+	if j.Tap != nil {
+		j.Tap(agent, tool, args)
+	}
+}
+
 func (j *Job) emit(agent, typ string, data map[string]any) { j.bus.Emit(j.ID, agent, typ, data) }
 
 func (j *Job) set(state string) {
@@ -230,6 +244,7 @@ func (j *Job) Agent(id string) runtime.Agent {
 // SaveHandoff stores a note written through the handoff tool and returns
 // what is wrong with it, if anything.
 func (j *Job) SaveHandoff(agent string, n *handoff.Note) []string {
+	j.tap(agent, "handoff", n)
 	j.mu.Lock()
 	dir := j.cwd[agent]
 	j.mu.Unlock()
@@ -254,6 +269,7 @@ func (j *Job) SaveHandoff(agent string, n *handoff.Note) []string {
 // SetChecks records the check commands an agent worked out from your test
 // notes. The engine runs them; the agent doesn't decide when it passes.
 func (j *Job) SetChecks(agent string, commands []string, why string) error {
+	j.tap(agent, "set_checks", map[string]any{"commands": commands, "why": why})
 	var clean []string
 	for _, c := range commands {
 		if c = strings.TrimSpace(c); c != "" {
