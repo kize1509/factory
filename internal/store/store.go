@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS projects (
 );
 CREATE TABLE IF NOT EXISTS runs (
   id         TEXT PRIMARY KEY,     -- the run folder's name under .factory/runs
+  repo       TEXT,                 -- the project's repo path
   setup      TEXT,                 -- model, runtime, prompt version, strategy
   commit_sha TEXT,
   kind       TEXT,                 -- job, scenario, static, tests
@@ -73,6 +74,7 @@ CREATE TABLE IF NOT EXISTS passes (
 CREATE TABLE IF NOT EXISTS ledger (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   pass       TEXT NOT NULL,
+  repo       TEXT,                 -- the project's repo path: feature ids repeat across projects
   feature    TEXT NOT NULL,
   technique  TEXT NOT NULL,
   agent      TEXT,
@@ -83,6 +85,7 @@ CREATE TABLE IF NOT EXISTS ledger (
   created    TEXT
 );
 CREATE INDEX IF NOT EXISTS ledger_pass ON ledger(pass, id);
+CREATE INDEX IF NOT EXISTS ledger_repo ON ledger(repo, feature, technique);
 CREATE TABLE IF NOT EXISTS prices (
   model       TEXT PRIMARY KEY,    -- provider/id, e.g. anthropic/claude-sonnet-5-5
   input       REAL NOT NULL,       -- US dollars per million tokens

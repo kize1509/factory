@@ -1,6 +1,7 @@
 package patrol
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -50,4 +51,30 @@ func gitHead(repo string) (string, error) {
 	cmd := exec.Command("git", "-C", repo, "rev-parse", "HEAD")
 	out, err := cmd.Output()
 	return strings.TrimSpace(string(out)), err
+}
+
+// CanonicalRepo resolves a repo path to one name per project: absolute,
+// symlinks resolved, and the git toplevel, so "./app", "/x/app/", a symlink
+// to it and a subfolder of it all key the same ledger history.
+func CanonicalRepo(path string) (string, error) {
+	if path == "" {
+		return "", fmt.Errorf("no repo path")
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	real, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return "", fmt.Errorf("repo %s: %w", path, err)
+	}
+	out, err := exec.Command("git", "-C", real, "rev-parse", "--show-toplevel").Output()
+	if err != nil {
+		return "", fmt.Errorf("repo %s is not a git repo", path)
+	}
+	top, err := filepath.EvalSymlinks(strings.TrimSpace(string(out)))
+	if err != nil {
+		return "", err
+	}
+	return top, nil
 }

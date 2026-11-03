@@ -9,6 +9,7 @@ import (
 // this row is what queries (the ledger, trends, baselines) read.
 type Run struct {
 	ID        string  `json:"id"`
+	Repo      string  `json:"repo,omitempty"`
 	Setup     string  `json:"setup,omitempty"`
 	Commit    string  `json:"commit"`
 	Kind      string  `json:"kind"`
@@ -25,6 +26,7 @@ type Run struct {
 type LedgerRow struct {
 	ID        int64   `json:"id"`
 	Pass      string  `json:"pass"`
+	Repo      string  `json:"repo,omitempty"`
 	Feature   string  `json:"feature"`
 	Technique string  `json:"technique"`
 	Agent     string  `json:"agent"`
@@ -49,14 +51,14 @@ type PassRow struct {
 }
 
 func (s *Store) AddRun(r Run) error {
-	_, err := s.db.Exec(`INSERT OR REPLACE INTO runs(id, setup, commit_sha, kind, feature, technique, pass, wall_ms, cost_usd, dir, created) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
-		r.ID, r.Setup, r.Commit, r.Kind, r.Feature, r.Technique, r.Pass, r.WallMS, r.CostUSD, r.Dir, time.Now().Format(time.RFC3339Nano))
+	_, err := s.db.Exec(`INSERT OR REPLACE INTO runs(id, repo, setup, commit_sha, kind, feature, technique, pass, wall_ms, cost_usd, dir, created) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+		r.ID, r.Repo, r.Setup, r.Commit, r.Kind, r.Feature, r.Technique, r.Pass, r.WallMS, r.CostUSD, r.Dir, time.Now().Format(time.RFC3339Nano))
 	return err
 }
 
 func (s *Store) AddLedger(l LedgerRow) (int64, error) {
-	res, err := s.db.Exec(`INSERT INTO ledger(pass, feature, technique, agent, commit_sha, run, verdict, note, created) VALUES(?,?,?,?,?,?,?,?,?)`,
-		l.Pass, l.Feature, l.Technique, l.Agent, l.Commit, l.Run, l.Verdict, l.Note, time.Now().Format(time.RFC3339Nano))
+	res, err := s.db.Exec(`INSERT INTO ledger(pass, repo, feature, technique, agent, commit_sha, run, verdict, note, created) VALUES(?,?,?,?,?,?,?,?,?,?)`,
+		l.Pass, l.Repo, l.Feature, l.Technique, l.Agent, l.Commit, l.Run, l.Verdict, l.Note, time.Now().Format(time.RFC3339Nano))
 	if err != nil {
 		return 0, err
 	}
@@ -66,7 +68,7 @@ func (s *Store) AddLedger(l LedgerRow) (int64, error) {
 // Ledger lists a pass's rows in the order they were recorded, with the
 // run's folder and metrics joined in.
 func (s *Store) Ledger(pass string) ([]LedgerRow, error) {
-	rows, err := s.db.Query(`SELECT l.id, l.pass, l.feature, l.technique, l.agent, l.commit_sha, l.run, COALESCE(r.dir,''), l.verdict, l.note,
+	rows, err := s.db.Query(`SELECT l.id, l.pass, COALESCE(l.repo,''), l.feature, l.technique, l.agent, l.commit_sha, l.run, COALESCE(r.dir,''), l.verdict, l.note,
 		COALESCE(r.wall_ms,0), COALESCE(r.cost_usd,0), l.created
 		FROM ledger l LEFT JOIN runs r ON r.id = l.run WHERE l.pass=? ORDER BY l.id`, pass)
 	if err != nil {
@@ -77,7 +79,7 @@ func (s *Store) Ledger(pass string) ([]LedgerRow, error) {
 	for rows.Next() {
 		var l LedgerRow
 		var agent, commit, note *string
-		if err := rows.Scan(&l.ID, &l.Pass, &l.Feature, &l.Technique, &agent, &commit, &l.Run, &l.RunDir, &l.Verdict, &note, &l.WallMS, &l.CostUSD, &l.Time); err != nil {
+		if err := rows.Scan(&l.ID, &l.Pass, &l.Repo, &l.Feature, &l.Technique, &agent, &commit, &l.Run, &l.RunDir, &l.Verdict, &note, &l.WallMS, &l.CostUSD, &l.Time); err != nil {
 			return nil, err
 		}
 		if agent != nil {
@@ -94,10 +96,11 @@ func (s *Store) Ledger(pass string) ([]LedgerRow, error) {
 	return out, rows.Err()
 }
 
-// LastChecked is when each feature × technique was last checked, for the
-// scheduler: least recently checked goes first. Key is feature + "\x00" + technique.
-func (s *Store) LastChecked() (map[string]string, error) {
-	rows, err := s.db.Query(`SELECT feature, technique, MAX(created) FROM ledger GROUP BY feature, technique`)
+// LastChecked is when each feature × technique of one repo was last checked,
+// for the scheduler: least recently checked goes first. Only that repo's
+// rows count: feature ids like "root" repeat across projects. Key is feature + "\x00" + technique.
+func (s *Store) LastChecked(repo string) (map[string]string, error) {
+	rows, err := s.db.Query(`SELECT feature, technique, MAX(created) FROM ledger WHERE repo=? GROUP BY feature, technique`, repo)
 	if err != nil {
 		return nil, err
 	}

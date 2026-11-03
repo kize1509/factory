@@ -3,6 +3,7 @@ package patrol
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"factory/internal/prompts"
 	"factory/internal/runtime"
@@ -30,10 +31,33 @@ Do not fix anything and do not edit files. Do not run the check twice unless the
 type RuntimeAgent struct {
 	RT    runtime.Runtime
 	Model string
-	Cost  func(pass, agent string) float64 // USD spent so far by the agent; may be nil
+	Cost  func(pass, agent string) float64 // USD spent so far by the agent name, over all its tasks; may be nil
+
+	mu   sync.Mutex
+	base map[*Task]float64 // Cost when each task started: an agent name is reused
 }
 
-func (r RuntimeAgent) Patrol(ctx context.Context, t *Task) (float64, error) {
+// Spent is what the task has cost so far. The pass polls it to hold the budget.
+func (r *RuntimeAgent) Spent(t *Task) float64 {
+	if r.Cost == nil {
+		return 0
+	}
+	r.mu.Lock()
+	b := r.base[t]
+	r.mu.Unlock()
+	return r.Cost(t.Pass, t.Agent) - b
+}
+
+func (r *RuntimeAgent) Patrol(ctx context.Context, t *Task) (float64, error) {
+	if r.Cost != nil {
+		r.mu.Lock()
+		if r.base == nil {
+			r.base = map[*Task]float64{}
+		}
+		r.base[t] = r.Cost(t.Pass, t.Agent)
+		r.mu.Unlock()
+		defer func() { r.mu.Lock(); delete(r.base, t); r.mu.Unlock() }()
+	}
 	a, err := r.RT.Start(ctx, runtime.AgentSpec{Job: "pass-" + t.Pass, Agent: t.Agent, Cwd: t.Repo, Model: r.Model,
 		System: prompts.For("patrol"), Role: "patrol", Tools: []string{"bash", "read"}})
 	if err != nil {
@@ -50,11 +74,7 @@ func (r RuntimeAgent) Patrol(ctx context.Context, t *Task) (float64, error) {
 	}()
 	_, err = a.Prompt(ctx, PromptFor(t))
 	defer a.Stop()
-	var cost float64
-	if r.Cost != nil {
-		cost = r.Cost(t.Pass, t.Agent)
-	}
-	return cost, err
+	return r.Spent(t), err
 }
 
 func headCommit(repo string) (string, error) {

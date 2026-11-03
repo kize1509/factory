@@ -129,3 +129,81 @@ func TestMapFeatures(t *testing.T) {
 		t.Fatalf("%+v", fs)
 	}
 }
+
+func TestSplitIgnoresOtherProjectsHistory(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "f.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	repoA, repoB := fixture.New(t, "seeded"), fixture.New(t, "seeded")
+	// project A checked root × tests just now; project B never has
+	db.AddLedger(store.LedgerRow{Pass: "PA", Repo: repoA, Feature: "root", Technique: "tests", Run: "x", Verdict: OK})
+	b := &Pass{ID: "PB", Repo: repoB, Store: db, Techniques: []string{"tests", "static"}}
+	cells := b.split([]Feature{{ID: "root"}})
+	if len(cells) != 2 || cells[0].t != "tests" { // both never checked in B: original order kept
+		t.Fatalf("B's cells were ordered by A's history: %+v", cells)
+	}
+	// and A's own history still counts for A
+	a := &Pass{ID: "PA2", Repo: repoA, Store: db, Techniques: []string{"tests", "static"}}
+	if cells := a.split([]Feature{{ID: "root"}}); cells[0].t != "static" {
+		t.Fatalf("A should do the unchecked cell first: %+v", cells)
+	}
+}
+
+// meterAgent is an agent that is still working but already reports spend.
+type meterAgent struct{ usd float64 }
+
+func (m meterAgent) Spent(*Task) float64 { return m.usd }
+func (m meterAgent) Patrol(ctx context.Context, t *Task) (float64, error) {
+	<-ctx.Done() // never finishes by itself
+	return m.usd, nil
+}
+
+func TestInFlightSpendStopsPass(t *testing.T) {
+	p, _ := newPass(t, meterAgent{usd: 0.03}, Budget{USD: 0.05, Agents: 2, Poll: 10 * time.Millisecond})
+	done := make(chan *Summary)
+	go func() { s, _ := p.Run(context.Background()); done <- s }()
+	select {
+	case s := <-done:
+		// two agents at 0.03 each reach 0.06 while both are mid-task
+		if s.State != OverRun || len(s.Next) != 2 {
+			t.Fatalf("%+v", s)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("pass kept running past its USD budget")
+	}
+}
+
+func TestRepoPathsShareOneHistory(t *testing.T) {
+	repo := fixture.New(t, "seeded")
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(repo, link); err != nil {
+		t.Fatal(err)
+	}
+	want, err := CanonicalRepo(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wd, _ := os.Getwd()
+	rel, _ := filepath.Rel(wd, repo)
+	for _, in := range []string{repo, repo + "/", link, rel, filepath.Join(repo, "sub", "..")} {
+		if got, err := CanonicalRepo(in); err != nil || got != want {
+			t.Fatalf("%q -> %q, %v; want %q", in, got, err, want)
+		}
+	}
+	if _, err := CanonicalRepo(filepath.Join(repo, "missing")); err == nil {
+		t.Fatal("a missing path must fail")
+	}
+	// a pass started through the symlink writes the canonical repo to the ledger,
+	// so a pass through the plain path sees its history
+	db, _ := store.Open(filepath.Join(t.TempDir(), "f.db"))
+	defer db.Close()
+	p := &Pass{ID: "P1", Repo: link + "/", Root: t.TempDir(), Store: db, Agent: AgentFunc(honest), Features: []Feature{{ID: "root"}}, Techniques: []string{"tests"}}
+	if _, err := p.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if last, _ := db.LastChecked(want); len(last) != 1 {
+		t.Fatalf("history not under the canonical repo: %v", last)
+	}
+}

@@ -19,7 +19,7 @@ It adds a detached git worktree of the repo at a fixed commit (HEAD unless `--co
 `internal/patrol`. `Pass.Run`:
 
 1. **Map.** `MapFeatures` makes one feature per source folder (`root` for the top). A surveyor agent can add routes, screens and commands later.
-2. **Split.** Cells of feature × technique, never-checked first, then least recently checked (from the ledger). `Budget.Checks` caps the count.
+2. **Split.** Cells of feature × technique, never-checked first, then least recently checked (from the ledger, that repo's rows only). `Budget.Checks` caps the count.
 3. **Patrol.** `Budget.Agents` workers take cells. Each agent gets `PromptFor(task)`: run `factory test check`, read the Result and logs, call `record_check(run, verdict, note)`.
 4. **Record.** `record_check` checks that the run belongs to the agent's cell and commit, and that a failed run is not recorded `ok`. After the agent returns, the pass writes a `runs` row and a `ledger` row. An agent that recorded nothing gets a `blocked` row, so a cell is never silently lost.
 
@@ -27,11 +27,11 @@ Per D2 the agent only sends requests: `record_check` is an engine tool (MCP and 
 
 ## Budget and kill switch
 
-The pass context carries the time budget. Before handing out a cell, and before every `Task.Check`, the pass checks for stop, USD spent and the deadline. `Pass.Stop` cancels the context, which stops runtime agents (and their shell child). A stopped or over-budget pass still returns a summary; cells not reached go into `next`. USD is counted when an agent returns, so up to `Agents` in-flight checks can overshoot the USD budget by their own cost.
+The pass context carries the time budget. Before handing out a cell, and before every `Task.Check`, the pass checks for stop, USD spent and the deadline. `Pass.Stop` cancels the context, which stops runtime agents (and their shell child). A stopped or over-budget pass still returns a summary; cells not reached go into `next`. USD is held while agents run: an agent that implements `Meter` (`RuntimeAgent` reads usage events per task) is polled every `Budget.Poll` (2s), and the pass cancels once finished plus running spend reaches `Budget.USD`. Spend between two polls can still land past the line, by at most what the agents spend in one poll interval.
 
 ## Storage and API
 
-SQLite tables next to `events`: `runs` (id, setup, commit, kind, feature, technique, pass, wall_ms, cost_usd, dir), `passes` (state, summary JSON) and `ledger` (pass, feature, technique, agent, commit, run, verdict, note).
+SQLite tables next to `events`: `runs` (id, repo, setup, commit, kind, feature, technique, pass, wall_ms, cost_usd, dir), `passes` (state, summary JSON) and `ledger` (pass, repo, feature, technique, agent, commit, run, verdict, note).
 
 - `POST /api/passes` `{repo, runtime, usd, minutes, agents, checks, techniques}` starts a pass.
 - `GET /api/passes/{id}` and `GET /api/passes/{id}/ledger` (rows with `run`, `run_dir`, `verdict`, `wall_ms`, `cost_usd`).

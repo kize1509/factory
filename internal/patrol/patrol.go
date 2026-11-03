@@ -46,6 +46,7 @@ type Budget struct {
 	Agents  int           `json:"agents"`
 	Checks  int           `json:"checks"` // most checks in one pass
 	Timeout time.Duration `json:"-"`      // per check command; default harness.CheckTimeout
+	Poll    time.Duration `json:"-"`      // how often live agent spend is read; default 2s
 }
 
 // Feature is one entry of the feature map.
@@ -87,6 +88,12 @@ func (t *Task) Record(runID, verdict, note string) error {
 // Record before returning; a missing record becomes a blocked row.
 type Agent interface {
 	Patrol(ctx context.Context, t *Task) (cost float64, err error)
+}
+
+// Meter is an Agent that can say what a running task has cost so far, so the
+// pass can stop at the USD budget while agents are still working.
+type Meter interface {
+	Spent(t *Task) float64
 }
 
 // AgentFunc adapts a function to Agent.
@@ -183,6 +190,55 @@ func (p *Pass) allow(ctx context.Context) error {
 	return nil
 }
 
+// live is the USD of tasks still running, read from the agents' meter.
+func (p *Pass) live() float64 {
+	m, ok := p.Agent.(Meter)
+	if !ok {
+		return 0
+	}
+	p.mu.Lock()
+	tasks := make([]*Task, 0, len(p.active))
+	for _, t := range p.active {
+		tasks = append(tasks, t)
+	}
+	p.mu.Unlock()
+	var usd float64
+	for _, t := range tasks {
+		usd += m.Spent(t)
+	}
+	return usd
+}
+
+// watchSpend ends the pass as soon as finished plus running spend reaches the
+// USD budget. It is what keeps a budget from being overshot by agents that
+// are still mid-task.
+func (p *Pass) watchSpend(ctx context.Context) {
+	if p.Budget.USD <= 0 {
+		return
+	}
+	every := p.Budget.Poll
+	if every <= 0 {
+		every = 2 * time.Second
+	}
+	tick := time.NewTicker(every)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+			// live first, then spent: a task finishing in between is then
+			// counted twice rather than not at all
+			l := p.live()
+			p.mu.Lock()
+			if p.spent+l >= p.Budget.USD {
+				p.over()
+			}
+			p.mu.Unlock()
+		}
+	}
+}
+
 // over marks the budget as used up and cancels the rest. Caller holds mu.
 func (p *Pass) over() {
 	if p.state == Running {
@@ -207,9 +263,14 @@ func (p *Pass) Run(ctx context.Context) (*Summary, error) {
 	if p.Agent == nil || p.Store == nil {
 		return nil, errors.New("pass needs an agent and a store")
 	}
-	if p.Root == "" {
-		p.Root = p.Repo
+	repo, err := CanonicalRepo(p.Repo)
+	if err != nil {
+		return nil, err
 	}
+	if p.Root == "" || p.Root == p.Repo {
+		p.Root = repo
+	}
+	p.Repo = repo
 	if len(p.Techniques) == 0 {
 		p.Techniques = harness.Techniques
 	}
@@ -255,6 +316,8 @@ func (p *Pass) Run(ctx context.Context) (*Summary, error) {
 	if p.Budget.Checks > 0 && len(cells) > p.Budget.Checks {
 		cells = cells[:p.Budget.Checks]
 	}
+
+	go p.watchSpend(ctx)
 
 	// patrol: agents take cells in order; the pass stops handing out work
 	// once it is stopped or the budget is gone
@@ -323,7 +386,7 @@ func (p *Pass) split(features []Feature) []cell {
 			cells = append(cells, cell{f, t})
 		}
 	}
-	last, _ := p.Store.LastChecked()
+	last, _ := p.Store.LastChecked(p.Repo)
 	sort.SliceStable(cells, func(i, j int) bool {
 		a, b := last[cells[i].f.ID+"\x00"+cells[i].t], last[cells[j].f.ID+"\x00"+cells[j].t]
 		if a != b {
@@ -356,17 +419,17 @@ func (p *Pass) patrolOne(ctx context.Context, t *Task) {
 		p.sum.Checks++
 		p.sum.Blocked++
 		p.mu.Unlock()
-		p.Store.AddLedger(store.LedgerRow{Pass: p.ID, Feature: t.Feature.ID, Technique: t.Technique, Agent: t.Agent, Commit: t.Commit, Run: "", Verdict: Blocked, Note: note})
+		p.Store.AddLedger(store.LedgerRow{Pass: p.ID, Repo: p.Repo, Feature: t.Feature.ID, Technique: t.Technique, Agent: t.Agent, Commit: t.Commit, Run: "", Verdict: Blocked, Note: note})
 		return
 	}
 	res, err := harness.Results(p.Root, rec.run) // checked in record
 	if err != nil {
 		res = &harness.Result{}
 	}
-	run := store.Run{ID: rec.run, Setup: "patrol", Commit: t.Commit, Kind: res.Kind, Feature: t.Feature.ID, Technique: t.Technique,
+	run := store.Run{ID: rec.run, Repo: p.Repo, Setup: "patrol", Commit: t.Commit, Kind: res.Kind, Feature: t.Feature.ID, Technique: t.Technique,
 		Pass: res.Pass, WallMS: res.Metrics["wall_ms"], CostUSD: res.Metrics["cost_usd"] + cost, Dir: harness.RunDir(p.Root, rec.run)}
 	p.Store.AddRun(run)
-	p.Store.AddLedger(store.LedgerRow{Pass: p.ID, Feature: t.Feature.ID, Technique: t.Technique, Agent: t.Agent, Commit: t.Commit, Run: rec.run, Verdict: rec.verdict, Note: rec.note})
+	p.Store.AddLedger(store.LedgerRow{Pass: p.ID, Repo: p.Repo, Feature: t.Feature.ID, Technique: t.Technique, Agent: t.Agent, Commit: t.Commit, Run: rec.run, Verdict: rec.verdict, Note: rec.note})
 	p.mu.Lock()
 	p.sum.Checks++
 	p.sum.Runs = append(p.sum.Runs, rec.run)

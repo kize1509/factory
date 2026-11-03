@@ -67,6 +67,12 @@ func (s *Server) startPass(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "need a repo", http.StatusBadRequest)
 		return
 	}
+	repo, err := patrol.CanonicalRepo(b.Repo)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	b.Repo = repo
 	if b.Runtime == "" {
 		b.Runtime = "claude-code"
 	}
@@ -82,7 +88,7 @@ func (s *Server) startPass(w http.ResponseWriter, r *http.Request) {
 	id := fmt.Sprintf("P%d", time.Now().UnixMilli())
 	p := &patrol.Pass{ID: id, Project: filepath.Base(b.Repo), Repo: b.Repo, Techniques: b.Tech, Store: s.Store,
 		Budget: patrol.Budget{USD: b.USD, Time: time.Duration(b.Minutes * float64(time.Minute)), Agents: b.Agents, Checks: b.Checks}}
-	p.Agent = patrol.RuntimeAgent{RT: rt, Model: s.Model, Cost: func(pass, agent string) float64 { return s.agentCost("pass-"+pass, agent) }}
+	p.Agent = &patrol.RuntimeAgent{RT: rt, Model: s.Model, Cost: func(pass, agent string) float64 { return s.agentCost("pass-"+pass, agent) }}
 	s.passes[id] = p
 	s.mu.Unlock()
 	s.Bus.Place("pass-"+id, filepath.Join(config.Home(), "passes", id))
