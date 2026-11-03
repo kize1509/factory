@@ -92,10 +92,42 @@ func (w *Worktree) Uncommit(base string) error {
 	return err
 }
 
-// Push sends the job branch to origin.
+// Push sends the job branch to origin. If origin's copy of the branch has
+// commits this one lacks, it rebases onto them first (commits whose change
+// is already there drop out), so the push is a fast-forward. A rebase that
+// conflicts is aborted and leaves the branch as it was.
 func (w *Worktree) Push() error {
+	if err := w.Sync(); err != nil {
+		return err
+	}
 	_, err := git(w.Path, "push", "-u", "origin", w.Branch)
 	return err
+}
+
+// Sync fetches origin's copy of the job branch and, when it has moved on,
+// rebases the job branch onto it. No copy on origin is fine.
+func (w *Worktree) Sync() error {
+	remote := "refs/remotes/origin/" + w.Branch
+	if _, err := git(w.Path, "fetch", "-q", "origin", "+refs/heads/"+w.Branch+":"+remote); err != nil {
+		if _, lerr := git(w.Path, "ls-remote", "--exit-code", "--heads", "origin", w.Branch); lerr != nil {
+			return nil // the branch isn't on origin yet
+		}
+		return err
+	}
+	if _, err := git(w.Path, "merge-base", "--is-ancestor", remote, "HEAD"); err == nil {
+		return nil // origin is behind or level: a plain push will do
+	}
+	if _, err := git(w.Path, "rebase", "-q", remote); err != nil {
+		git(w.Path, "rebase", "--abort")
+		return fmt.Errorf("origin/%s has commits that conflict with the job's; rebase them by hand: %w", w.Branch, err)
+	}
+	return nil
+}
+
+// IsClean reports whether the worktree has no uncommitted changes.
+func (w *Worktree) IsClean() bool {
+	out, err := git(w.Path, "status", "--porcelain")
+	return err == nil && strings.TrimSpace(out) == ""
 }
 
 // OpenPR opens a pull request for the job branch with the gh CLI and

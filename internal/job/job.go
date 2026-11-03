@@ -415,6 +415,13 @@ func (j *Job) run(ctx context.Context) (*workspace.Worktree, error) {
 		if err != nil {
 			return orWT(work, wt), err
 		}
+		if commitOnly && r.Phase == "shipping" && work == wt && wt.IsClean() {
+			if head, _ := wt.Head(); head != "" && head != j.base {
+				// the engine's commit is made (and maybe pushed): ship it as it is,
+				// since committing again would give it a new SHA that clashes with origin
+				return work, j.shipCommitted(wt, head)
+			}
+		}
 		if commitOnly {
 			return work, j.commit(wt, work, a)
 		}
@@ -596,6 +603,11 @@ func (j *Job) commit(wt, work *workspace.Worktree, a runtime.Agent) error {
 	if err != nil {
 		return err
 	}
+	return j.shipCommitted(wt, sha)
+}
+
+// shipCommitted records the job's commit, ships it and marks the job done.
+func (j *Job) shipCommitted(wt *workspace.Worktree, sha string) error {
 	if len(sha) > 7 {
 		sha = sha[:7]
 	}
@@ -618,6 +630,12 @@ func (j *Job) ship(wt *workspace.Worktree) error {
 	j.set("shipping")
 	if err := wt.Push(); err != nil {
 		return fmt.Errorf("push: %w", err)
+	}
+	if head, _ := wt.Head(); len(head) >= 7 && !strings.HasPrefix(head, j.Commit) {
+		j.mu.Lock()
+		j.Commit = head[:7] // rebased onto origin's copy of the branch
+		j.mu.Unlock()
+		j.emit("", "ship.rebased", map[string]any{"sha": head[:7], "branch": wt.Branch})
 	}
 	j.emit("", "job.pushed", map[string]any{"branch": wt.Branch})
 	if mode != "pr" {

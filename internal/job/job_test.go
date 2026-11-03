@@ -305,6 +305,57 @@ func TestShipPushSendsBranchToOrigin(t *testing.T) {
 	}
 }
 
+// A job stuck after its push (here the PR can't open) and carried on ships
+// the commit it already pushed, rather than making it again with a new SHA
+// that origin would refuse.
+func TestResumeAtShippingKeepsPushedCommit(t *testing.T) {
+	bin := t.TempDir() // a gh that always fails, so the PR step gets stuck
+	os.WriteFile(filepath.Join(bin, "gh"), []byte("#!/bin/sh\necho no such repo >&2\nexit 1\n"), 0o755)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	repo := gitRepo(t)
+	remote := t.TempDir()
+	gitOut(t, remote, "init", "-q", "--bare")
+	gitOut(t, repo, "remote", "add", "origin", remote)
+	bus := events.NewBus(t.TempDir())
+	rt := &committingRT{}
+	spec := Spec{Ship: "pr", ID: "P2", Title: "make app", Repo: repo, Prompt: "write done into app.txt"}
+	j := New(spec, bus, rt)
+	rt.job = j
+	bus.Place(j.ID, j.Dir())
+	ctx, stop := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { j.Run(ctx); close(done) }()
+	for i := 0; i < 300 && j.stateNow() != "stuck"; i++ {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if j.stateNow() != "stuck" {
+		t.Fatalf("state %s, want stuck on the PR; error %q", j.stateNow(), j.Error)
+	}
+	stop()
+	<-done
+	pushed := gitOut(t, remote, "rev-parse", "factory/P2")
+
+	// a new engine carries it on; the PR gets opened by hand, so just push
+	spec.Ship = "push"
+	rt2 := &committingRT{}
+	j2 := New(spec, bus, rt2)
+	j2.State = "stuck"
+	rt2.job = j2
+	if start, err := j2.Continue("try again"); err != nil || !start {
+		t.Fatalf("continue: %v %v", start, err)
+	}
+	j2.Run(context.Background())
+	if j2.State != "done" {
+		t.Fatalf("state %s error %q", j2.State, j2.Error)
+	}
+	if got := gitOut(t, remote, "rev-parse", "factory/P2"); got != pushed {
+		t.Fatalf("origin moved from %s to %s", pushed, got)
+	}
+	if !strings.HasPrefix(pushed, j2.Commit) {
+		t.Fatalf("job commit %s, origin %s", j2.Commit, pushed)
+	}
+}
+
 // stuckRT plays a builder who can't get the check to pass on its own; it
 // gets there once you tell it how.
 type stuckRT struct {
