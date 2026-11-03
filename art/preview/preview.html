@@ -1494,11 +1494,6 @@ for (const j of JOBS) if (j !== cur) { const keep = procs; procs = j.st.procs; s
   const po = img(A.assets['portrait/homer'].states.idle.file), fr = img(A.assets['frame/bronze-32'].states.idle.file);
   const paint = () => { c.clearRect(0, 0, 104, 104); c.drawImage(po, 6, 6, 92, 92); c.drawImage(fr, 0, 0, 104, 104); };
   po.onload = fr.onload = paint; if (po.complete && fr.complete) paint(); }
-if (!LIVE_APP) {
-  for (const j of JOBS) if (j !== cur) narrate(NARR[j.st.setup], j);
-  resize(); applySetup(cur.st.setup); narrate(NARR[cur.st.setup]);
-} else { resize(); }
-requestAnimationFrame(frame);
 
 // ---------- live mode: the map follows a running engine ----------
 // Served by `factory serve`, the page reads real jobs and their events.
@@ -1964,6 +1959,14 @@ document.getElementById('ntf').onsubmit = async ev => {
   closeModal('m-task');
   enterCity(addLiveJob({ id, title:body.notes ? body.notes.split('\n')[0] : body.issue, repo:body.repo, state:'starting' }));
 };
+// first paint, once every const above is declared: the map's countries and
+// islands read COUNTRY_INK, PROJECTS and projectName, which come after the
+// scene code
+if (!LIVE_APP) {
+  for (const j of JOBS) if (j !== cur) narrate(NARR[j.st.setup], j);
+  resize(); applySetup(cur.st.setup); narrate(NARR[cur.st.setup]);
+} else { resize(); }
+requestAnimationFrame(frame);
 goLive();
 </script>
 </body>
