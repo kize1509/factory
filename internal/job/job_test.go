@@ -12,10 +12,11 @@ import (
 	"factory/internal/events"
 	"factory/internal/handoff"
 	"factory/internal/runtime"
+	"factory/internal/workspace"
 )
 
-// fakeRT plays a builder: the first turn breaks the check and touches a
-// test file, the fix turn makes the check pass, and it only writes its
+// fakeRT plays a builder: the first turn breaks the check, adds a test
+// file and edits an existing one, the fix turn makes the check pass, and it only writes its
 // handoff after the engine reminds it.
 type fakeRT struct{ job *Job }
 
@@ -35,6 +36,7 @@ func (a *fakeAgent) Prompt(_ context.Context, text string) (string, error) {
 	case strings.HasPrefix(text, "Ticket"):
 		os.WriteFile(filepath.Join(a.cwd, "app.txt"), []byte("half done\n"), 0o644)
 		os.WriteFile(filepath.Join(a.cwd, "app_test.go"), []byte("package x\n"), 0o644)
+		os.WriteFile(filepath.Join(a.cwd, "old_test.go"), []byte("package x // weakened\n"), 0o644)
 	case strings.HasPrefix(text, "The checks failed"):
 		os.WriteFile(filepath.Join(a.cwd, "app.txt"), []byte("done\n"), 0o644)
 	case strings.HasPrefix(text, "Your handoff is missing"):
@@ -54,6 +56,14 @@ func TestPipelineHealsAndEnforcesHandoff(t *testing.T) {
 			t.Fatalf("%v %s", err, out)
 		}
 	}
+	os.WriteFile(filepath.Join(repo, "old_test.go"), []byte("package x\n"), 0o644)
+	for _, args := range [][]string{{"add", "old_test.go"}, {"commit", "-q", "-m", "old test"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repo
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v %s", err, out)
+		}
+	}
 	bus := events.NewBus(t.TempDir())
 	rt := &fakeRT{}
 	j := New(Spec{ID: "T1", Title: "make app", Repo: repo, Prompt: "write done into app.txt", Checks: []string{"grep -q '^done$' app.txt"}}, bus, rt)
@@ -64,8 +74,11 @@ func TestPipelineHealsAndEnforcesHandoff(t *testing.T) {
 	if j.State != "done" || j.Commit == "" {
 		t.Fatalf("state %s commit %q error %q", j.State, j.Commit, j.Error)
 	}
-	if _, err := os.Stat(filepath.Join(j.Worktree, "app_test.go")); !os.IsNotExist(err) {
-		t.Fatal("the new test file should have been removed")
+	if _, err := os.Stat(filepath.Join(j.Worktree, "app_test.go")); err != nil {
+		t.Fatal("the new test file should have stayed")
+	}
+	if b, _ := os.ReadFile(filepath.Join(j.Worktree, "old_test.go")); string(b) != "package x\n" {
+		t.Fatalf("the existing test file should have been put back, got %q", b)
 	}
 	log, _ := bus.Replay(j.ID)
 	seen := map[string]bool{}
@@ -540,5 +553,48 @@ func TestAgentAsksYouAndCarriesOn(t *testing.T) {
 	}
 	if rt.asked != 1 {
 		t.Errorf("asked %d times, want once", rt.asked)
+	}
+}
+
+// New test files always stay; existing ones go back unless the job allows
+// test changes (the New task checkbox).
+func TestProtectTestsKeepsNewTests(t *testing.T) {
+	repo := t.TempDir()
+	os.WriteFile(filepath.Join(repo, "old_test.go"), []byte("package x\n"), 0o644)
+	for _, args := range [][]string{{"init", "-q", "-b", "main"}, {"config", "user.email", "t@t"}, {"config", "user.name", "t"}, {"add", "."}, {"commit", "-q", "-m", "init"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repo
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v %s", err, out)
+		}
+	}
+	wt, err := workspace.Create(repo, "T9")
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.MkdirAll(filepath.Join(wt.Path, "e2e"), 0o755)
+	os.WriteFile(filepath.Join(wt.Path, "e2e", "flow.go"), []byte("package e2e\n"), 0o644)
+	os.WriteFile(filepath.Join(wt.Path, "old_test.go"), []byte("package x // edited\n"), 0o644)
+	bus := events.NewBus(t.TempDir())
+	j := New(Spec{ID: "T9", Repo: repo, TestsAllowed: true}, bus, &fakeRT{})
+	bus.Place(j.ID, j.Dir())
+	a := &fakeAgent{rt: &fakeRT{job: j}, cwd: wt.Path}
+
+	if j.protectTests(context.Background(), wt, a, builder) {
+		t.Fatal("with test changes allowed nothing should be undone")
+	}
+	if b, _ := os.ReadFile(filepath.Join(wt.Path, "old_test.go")); string(b) != "package x // edited\n" {
+		t.Fatalf("allowed edit was undone: %q", b)
+	}
+
+	j.TestsAllowed = false
+	if !j.protectTests(context.Background(), wt, a, builder) {
+		t.Fatal("the edit to an existing test should be reported")
+	}
+	if b, _ := os.ReadFile(filepath.Join(wt.Path, "old_test.go")); string(b) != "package x\n" {
+		t.Fatalf("existing test not put back: %q", b)
+	}
+	if _, err := os.Stat(filepath.Join(wt.Path, "e2e", "flow.go")); err != nil {
+		t.Fatal("the new e2e file should have stayed")
 	}
 }

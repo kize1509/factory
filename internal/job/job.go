@@ -453,9 +453,12 @@ func (j *Job) run(ctx context.Context) (*workspace.Worktree, error) {
 			task = strings.TrimSuffix(task, "\n\nThe engine will check your work with: ")
 			task += "\n\nHow to test this, from the person who started the job:\n" + j.TestNotes +
 				"\n\nBefore you change any code, call set_checks with the exact shell commands that test this work, based on those notes. " +
-				"Use the project's existing tests and tools; don't write new tests. The engine runs these commands after you finish and decides whether the work passes."
+				"Use the project's existing tests and tools, plus any tests this ticket asks you to write. The engine runs these commands after you finish and decides whether the work passes."
 		default:
 			task += "nothing (no checks were picked, so be extra careful)."
+		}
+		if j.TestsAllowed {
+			task += "\n\nYou may change existing test files in this task, not only add new ones."
 		}
 		if plan != nil {
 			task += "\n\nThe planner's handoff for you:\n" + string(mustJSON(plan))
@@ -775,9 +778,9 @@ func (j *Job) requireHandoff(ctx context.Context, agent string, a runtime.Agent)
 	}
 }
 
-// protectTests undoes edits to test files unless the task is about tests.
-// It reports whether an existing test file was changed (tampering); a new
-// test file is only removed.
+// protectTests puts back test files that exist at HEAD, unless the job
+// allows test changes. New test files stay: adding tests is fine, rewriting
+// the ones the checks rely on is not. It reports whether it undid anything.
 func (j *Job) protectTests(ctx context.Context, wt *workspace.Worktree, a runtime.Agent, agent string) bool {
 	if j.TestsAllowed {
 		return false
@@ -785,24 +788,16 @@ func (j *Job) protectTests(ctx context.Context, wt *workspace.Worktree, a runtim
 	changed, _ := wt.Changed()
 	var blocked []string
 	for _, f := range changed {
-		if isTestFile(f) {
+		if isTestFile(f) && wt.InHead(f) {
 			blocked = append(blocked, f)
 		}
 	}
-	if len(blocked) == 0 {
+	if len(blocked) == 0 || wt.Revert(blocked...) != nil {
 		return false
 	}
-	existing := false
-	for _, f := range blocked {
-		if wt.Revert(f) == nil {
-			existing = true
-		} else {
-			os.Remove(filepath.Join(wt.Path, f)) // a new test file has nothing to go back to
-		}
-	}
-	j.emit(agent, "workspace.blocked_write", map[string]any{"files": blocked, "existing": existing})
-	j.ask(ctx, a, "You added or changed test files, which is not allowed in this task. The engine undid it: "+strings.Join(blocked, ", ")+". Use the project's existing tests and fix the code instead.")
-	return existing
+	j.emit(agent, "workspace.blocked_write", map[string]any{"files": blocked, "existing": true})
+	j.ask(ctx, a, "You changed existing test files, which this task doesn't allow. The engine put them back: "+strings.Join(blocked, ", ")+". New test files are fine. Fix the code, not the tests the checks rely on.")
+	return true
 }
 
 func isTestFile(path string) bool {

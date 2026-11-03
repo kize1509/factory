@@ -325,6 +325,7 @@
           <option value="complex">Complex: large, vague or ambiguous, try several approaches</option>
         </select><span>Every job starts with Aristotle planning. Complex work may get a Symposium that tries several approaches side by side. Saying "this one is complex" in the notes does the same.</span></label>
       <label><b>How to test it</b> in your own words: which tests or tools prove it works. The agent turns this into commands; the engine runs them.<textarea name="tests" rows="3" placeholder="e.g. the unit tests (go test ./...) and the login e2e in e2e/login.spec.ts. Empty uses the repo's saved check plan."></textarea></label>
+      <label style="display:flex;flex-direction:row;gap:8px;align-items:flex-start"><input type="checkbox" name="tests_allowed" style="width:auto;flex:none;margin:3px 0 0;padding:0"><span><b>Let agents change existing tests</b> New test files are always allowed. Without this, the engine puts back any edit to a test file that's already in the repo.</span></label>
       <div style="display:grid;gap:6px">
         <label><b>Repository</b> the git repo the agents work in: pick it below, or paste its path<input name="repo" required placeholder="~/Projects/my-app" autocomplete="off" spellcheck="false" style="font:13px 'JetBrains Mono', monospace"></label>
         <div id="fs-pick"></div>
@@ -1914,7 +1915,7 @@ document.getElementById('ntf').onsubmit = async ev => {
   ev.preventDefault();
   const f = new FormData(ev.target), err = document.getElementById('nterr');
   const body = { issue:String(f.get('issue')).trim().toUpperCase(), notes:String(f.get('notes')).trim(), repo:String(f.get('repo')).trim(),
-    test_notes:String(f.get('tests')).trim(), complexity:f.get('complexity'), model:f.get('model') || undefined, runtime:f.get('runtime') || undefined };
+    test_notes:String(f.get('tests')).trim(), tests_allowed:f.get('tests_allowed') === 'on', complexity:f.get('complexity'), model:f.get('model') || undefined, runtime:f.get('runtime') || undefined };
   try { localStorage.setItem('newtask', JSON.stringify({ repo:body.repo, tests:f.get('tests'), model:f.get('model'), runtime:f.get('runtime') })); } catch {}
   err.textContent = 'Starting…';
   const r = await fetch('/api/jobs', { method:'POST', headers:{ 'content-type':'application/json' }, body:JSON.stringify(body) });
