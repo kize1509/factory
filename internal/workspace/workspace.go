@@ -57,6 +57,12 @@ func (w *Worktree) Diff() (string, error) {
 	return git(w.Path, "diff")
 }
 
+// InHead reports whether path exists in the branch's last commit.
+func (w *Worktree) InHead(path string) bool {
+	_, err := git(w.Path, "cat-file", "-e", "HEAD:"+path)
+	return err == nil
+}
+
 // Revert puts paths back to how they are at HEAD (used to undo edits to
 // protected test files).
 func (w *Worktree) Revert(paths ...string) error {
