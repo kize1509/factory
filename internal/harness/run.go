@@ -28,6 +28,10 @@ import (
 // to the run folder.
 type Result struct {
 	Run       string             `json:"run"`
+	Kind      string             `json:"kind,omitempty"`      // job, scenario, static, tests
+	Feature   string             `json:"feature,omitempty"`   // the feature map entry checked
+	Technique string             `json:"technique,omitempty"` // static, tests, ...
+	Commit    string             `json:"commit,omitempty"`    // the commit that was checked
 	Pass      bool               `json:"pass"`
 	Steps     []Step             `json:"steps"`
 	Failure   *Failure           `json:"failure,omitempty"`
@@ -202,7 +206,7 @@ func Record(ctx context.Context, root, id string, sp job.Spec, fixtureName strin
 		return o, nil, err
 	}
 	jd := o.Job.Dir()
-	r := &Result{Run: id, Metrics: Metrics(o.Events, o.Duration), ReplayCmd: "factory test replay " + id + " --json"}
+	r := &Result{Run: id, Kind: KindJob, Metrics: Metrics(o.Events, o.Duration), ReplayCmd: "factory test replay " + id + " --json"}
 	if err := copyEvidence(&r.Evidence, jd, dir, o.Events); err != nil {
 		return o, nil, err
 	}
