@@ -76,7 +76,7 @@ var healing = map[string]func(step) string{
 	"aristotle": planner,
 	"archimedes": func(s step) string {
 		switch {
-		case strings.HasPrefix(s.text, "Ticket"):
+		case strings.Contains(s.text, "Ticket "):
 			write(s, "app.txt", "half done\n")
 		case strings.HasPrefix(s.text, "The checks failed"):
 			write(s, "app.txt", "done\n")
@@ -91,7 +91,7 @@ var healing = map[string]func(step) string{
 var stubborn = map[string]func(step) string{
 	"aristotle": planner,
 	"archimedes": func(s step) string {
-		if strings.HasPrefix(s.text, "Ticket") {
+		if strings.Contains(s.text, "Ticket ") {
 			write(s, "app.txt", "half done\n")
 		}
 		if strings.HasPrefix(s.text, "The engine can't get this job further") {
@@ -105,7 +105,7 @@ var stubborn = map[string]func(step) string{
 var silent = map[string]func(step) string{
 	"aristotle": planner,
 	"archimedes": func(s step) string {
-		if strings.HasPrefix(s.text, "Ticket") {
+		if strings.Contains(s.text, "Ticket ") {
 			write(s, "app.txt", "done\n")
 		}
 		return "done, I think"

@@ -288,7 +288,8 @@ const CG_COLOR = { solon:CL.blue, herodotus:CL.terracotta, thales:CL.blue, anaxi
   hero:CL.blue, euclid:CL.olive, pythagoras:CL.marble, socrates:CL.shade, diogenes:CL.stone, zeno:CL.blue, heraclitus:CL.red, protagoras:CL.red, isocrates:CL.marble,
   xenophon:CL.blue, homer:CL.marble, solomun:CL.ink, you:['#c49a2c', '#9c7d3a'], oracle:['#3d8fd8', '#4a3f7a'] };   // you = bronze, oracle = sky-high
 const cgColor = (id, dark) => CG_COLOR[id]?.[dark ? 1 : 0] || 'var(--accent)';
-const CG_KIND = { handoff:{ label:'handoff', color:'var(--bar)' }, check:{ label:'check failure sent back', color:'var(--fail)' }, you:{ label:'your message', color:'var(--gold)' } };
+const CG_KIND = { question:{ label:'question', color:'var(--accent)' }, answer:{ label:'answer', color:'var(--ok)' }, handover:{ label:'handover', color:'var(--bar)' }, blocker:{ label:'blocker', color:'var(--warn)' },
+  handoff:{ label:'handoff', color:'var(--bar)' }, check:{ label:'check failure sent back', color:'var(--fail)' }, you:{ label:'your message', color:'var(--gold)' } };
 // one edge per (from, to, kind), with the messages behind its count
 function graphData(m) {
   const groups = new Map();
@@ -296,8 +297,9 @@ function graphData(m) {
     if (!g) groups.set(k, g = { id:k, a, b, kind, n:0, msgs:[], idx:0 }); g.n += n; if (msg) g.msgs.push(msg); };
   // counts come from the uncapped edges; the (capped) messages are only attached as detail
   const kindOf = a => a === 'oracle' ? 'check' : a === 'you' ? 'you' : 'handoff';
-  Object.entries(m.edges || {}).forEach(([k, n]) => { const [a, b] = k.split('>'); add(a, b, kindOf(a), null, n); });
-  (m.messages || []).forEach(x => { const g = groups.get(x.from + '>' + x.to + '>' + kindOf(x.from)); if (g) g.msgs.push(x); });
+  // "from>to>kind" for agent messages; older logs have "from>to" and the kind follows from the sender
+  Object.entries(m.edges || {}).forEach(([k, n]) => { const [a, b, kind] = k.split('>'); add(a, b, CG_KIND[kind] ? kind : kindOf(a), null, n); });
+  (m.messages || []).forEach(x => { const g = groups.get(x.from + '>' + x.to + '>' + (CG_KIND[x.kind] ? x.kind : kindOf(x.from))); if (g) g.msgs.push(x); });
   const seen = {};
   return [...groups.values()].map(g => { const p = g.a + '>' + g.b; g.idx = seen[p] = (seen[p] ?? -1) + 1; return g; });
 }
@@ -390,8 +392,8 @@ function initGraph(m) {
 
   // ----- selection and details -----
   let sel = null, hover = null, shown = '';
-  const stats = id => { const s = { sent:0, got:0, hand:0, chk:0, you:0 };
-    for (const e of edges) { if (e.a === id) { s.sent += e.n; if (e.kind === 'handoff') s.hand += e.n; } if (e.b === id) s.got += e.n; if (e.a === id || e.b === id) { if (e.kind === 'check') s.chk += e.n; if (e.kind === 'you') s.you += e.n; } }
+  const stats = id => { const s = { sent:0, got:0, hand:0, ask:0, chk:0, you:0 };
+    for (const e of edges) { if (e.a === id) { s.sent += e.n; if (e.kind === 'handoff' || e.kind === 'handover') s.hand += e.n; if (e.kind === 'question') s.ask += e.n; } if (e.b === id) s.got += e.n; if (e.a === id || e.b === id) { if (e.kind === 'check') s.chk += e.n; if (e.kind === 'you') s.you += e.n; } }
     return s; };
   const HINT = 'Hover or click an agent to see its totals. Click a line to list its messages. Drag agents, drag the background to pan, scroll to zoom. Keyboard: Tab to an agent, Enter to pin it, arrows move it; with the graph focused, + and − zoom, arrows pan, 0 fits, Esc clears.';
   const refresh = () => {
@@ -405,7 +407,7 @@ function initGraph(m) {
     if (!cur) { panel.innerHTML = `<p class="empty">${HINT}</p>`; return; }
     if (cur.t === 'n') { const s = stats(cur.id);
       panel.innerHTML = `<h3><span class="dot" style="background:${cgColor(cur.id, dark)}"></span>${esc(cur.id)}${sel?.t === 'n' && sel.id === cur.id ? ' <span class="tag">pinned</span>' : ''}</h3>
-        <div class="cgstats"><span><b>${s.sent}</b> sent</span><span><b>${s.got}</b> received</span><span><b>${s.hand}</b> handoffs</span><span><b>${s.chk}</b> check failures sent back</span><span><b>${s.you}</b> your messages</span></div>`; return; }
+        <div class="cgstats"><span><b>${s.sent}</b> sent</span><span><b>${s.got}</b> received</span><span><b>${s.hand}</b> handoffs</span><span><b>${s.ask}</b> questions asked</span><span><b>${s.chk}</b> check failures sent back</span><span><b>${s.you}</b> your messages</span></div>`; return; }
     const e = edges.find(x => x.id === cur.id), more = e.n - e.msgs.length;
     panel.innerHTML = `<h3>${esc(e.a)} → ${esc(e.b)} <span class="tag">${e.n} × ${CG_KIND[e.kind].label}</span></h3>` + (e.msgs.length
       ? `<ul class="cgmsgs">${e.msgs.map(x => `<li><span class="mono">${esc(new Date(x.time).toLocaleString())}</span> <span class="tag">${esc(x.job)}</span> ${esc(x.text)}</li>`).join('')}</ul>${more > 0 ? `<p class="empty">${more} older not listed.</p>` : ''}`
@@ -478,7 +480,7 @@ async function metrics() {
     <div class="card"><h2>Time per phase</h2><p class="help">Seconds spent in each state, all jobs together.</p>${bars(Object.entries(m.phase_seconds).map(([k, v]) => ({ k, v, tip:`${v.toFixed(1)} s` })).sort((a, b) => b.v - a.v), v => v.toFixed(1) + ' s')}</div>
     <div class="card"><h2>Tool calls</h2>${bars(Object.entries(m.tools).map(([k, v]) => ({ k, v })).sort((a, b) => b.v - a.v), v => fmt(v))}</div>
   </div>
-  <div class="card"><h2>Who talks to whom</h2><p class="help">Handoffs, check failures sent back, and your messages. Line width shows how often.</p>${graph(m)}</div>
+  <div class="card"><h2>Who talks to whom</h2><p class="help">Every message agents sent each other: questions, answers, handovers and blockers, plus check failures sent back and your messages. Line width shows how often.</p>${graph(m)}</div>
   <div class="card"><h2>Checks</h2>${Object.keys(m.checks).length ? `<table><tr><th>Command</th><th class="n">Passed</th><th class="n">Failed</th></tr>
     ${Object.entries(m.checks).map(([c, x]) => `<tr><td class="mono">${esc(c)}</td><td class="n">${x.Passed}</td><td class="n">${x.Failed ? `<span class="pill bad">${x.Failed}</span>` : 0}</td></tr>`).join('')}</table>` : '<p class="empty">No checks run yet.</p>'}</div>
   <div class="card"><h2>Jobs</h2>${m.jobs?.length ? `<table><tr><th>Job</th><th>Title</th><th>State</th><th class="n">Cost</th><th class="n">Time</th><th class="n">Requests</th><th class="n">Heal loops</th><th class="n">Handoffs</th></tr>

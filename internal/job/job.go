@@ -96,6 +96,12 @@ type Job struct {
 	resume      *Resume     // set when the next run carries a stuck job on
 	lastFailure string      // the last failed check output
 	named       bool        // the planner gave the job its title
+
+	roster     map[string]*Member // who works on the job, by agent
+	lastRoster string             // the last roster snapshot logged
+	msgSeq     int                // messages sent so far, for their IDs
+	busy       map[string]int     // agents in the middle of a turn
+	askTurn    map[string]int     // ask_agent questions each agent asked this turn
 }
 
 const (
@@ -149,7 +155,8 @@ func (j *Job) rtFor(name string) runtime.Runtime {
 }
 
 // AskBuilder passes a reviewer's question to the builder and returns its
-// answer: the reviewer grills the builder on its decisions.
+// answer: the reviewer grills the builder on its decisions. It is ask_agent
+// with the reviewer's own limit of questions per round.
 func (j *Job) AskBuilder(from, question string) (string, error) {
 	j.tap(from, "ask_builder", map[string]any{"question": question})
 	j.mu.Lock()
@@ -168,7 +175,7 @@ func (j *Job) AskBuilder(from, question string) (string, error) {
 		return "", fmt.Errorf("the builder is not available")
 	}
 	j.emit(from, "review.question", map[string]any{"to": j.lead, "question": question})
-	answer, err := j.ask(ctx, b, "Socrates, the reviewer, asks about your work:\n\n"+question+
+	answer, err := j.relay(ctx, from, j.lead, question, nil, "Socrates, the reviewer, asks about your work:\n\n"+question+
 		"\n\nAnswer him plainly and briefly, with file paths where it helps. Explain the reason behind your decision. Don't change any code now.")
 	if err != nil {
 		return "", err
@@ -205,7 +212,8 @@ func New(spec Spec, bus *events.Bus, rt runtime.Runtime) *Job {
 	}
 	return &Job{Spec: spec, State: "starting", Island: -1, Started: time.Now(), bus: bus, rt: rt,
 		agents: map[string]runtime.Agent{}, handoffs: map[string]*handoff.Note{}, answers: make(chan string, 1), guide: make(chan string, 1),
-		lead: builder, inExperiment: map[string]bool{}, labels: map[string]int{}, grades: map[string]int{}, cwd: map[string]string{}}
+		lead: builder, inExperiment: map[string]bool{}, labels: map[string]int{}, grades: map[string]int{}, cwd: map[string]string{},
+		busy: map[string]int{}, askTurn: map[string]int{}}
 }
 
 // Shipped reports the job's state and what it left behind: its pull request,
@@ -263,6 +271,7 @@ func (j *Job) SaveHandoff(agent string, n *handoff.Note) []string {
 	os.MkdirAll(filepath.Dir(path), 0o755)
 	os.WriteFile(path, mustJSON(n), 0o644)
 	j.emit(agent, "handoff.written", map[string]any{"note": n})
+	j.send(Message{Kind: KindHandover, From: agent, To: j.handoverTarget(agent, n), Text: strings.TrimSpace(n.Did + "\n\nNext: " + n.Next), Sources: []string{path}})
 	return nil
 }
 
@@ -377,7 +386,12 @@ func (j *Job) Run(parent context.Context) {
 		a.Stop()
 		delete(j.agents, id)
 	}
+	for _, m := range j.roster {
+		m.State = StateDone
+	}
+	snap := j.snapshotLocked()
 	j.mu.Unlock()
+	j.publish(snap)
 	if cancelled {
 		j.markCancelled()
 	}
@@ -452,7 +466,7 @@ func (j *Job) run(ctx context.Context) (*workspace.Worktree, error) {
 
 	if a == nil {
 		j.set("building")
-		a, err = j.rt.Start(ctx, runtime.AgentSpec{Job: j.ID, Agent: builder, Cwd: wt.Path, Model: j.Model, System: prompts.For("builder"),
+		a, err = j.rt.Start(ctx, runtime.AgentSpec{Job: j.ID, Agent: builder, Cwd: wt.Path, Model: j.Model, System: prompts.System("builder"),
 			Role: "builder", Skills: skills.Dirs(j.Skills)})
 		if err != nil {
 			return wt, fmt.Errorf("start builder: %w", err)
@@ -460,8 +474,9 @@ func (j *Job) run(ctx context.Context) (*workspace.Worktree, error) {
 		j.mu.Lock()
 		j.agents[builder] = a
 		j.mu.Unlock()
+		j.join(builder, "the plan is ready and the work is yours to build")
 
-		task := fmt.Sprintf("Ticket %s: %s\n\n%s\n\nScratch folder for logs, notes and evidence: %s\nPut those files there, never in the repo. Evidence paths in your handoff can point into it.\n\nThe engine will check your work with: %s",
+		task := j.rosterBrief(builder) + fmt.Sprintf("Ticket %s: %s\n\n%s\n\nScratch folder for logs, notes and evidence: %s\nPut those files there, never in the repo. Evidence paths in your handoff can point into it.\n\nThe engine will check your work with: %s",
 			j.ID, j.Title, j.Prompt, scratch, strings.Join(quoted(j.Checks), ", "))
 		switch {
 		case len(j.Checks) > 0:
@@ -719,7 +734,7 @@ func (j *Job) review(ctx context.Context, wt *workspace.Worktree, round int) (*V
 		var err error
 		role := j.role("reviewer")
 		r, err = j.rtFor("reviewer").Start(ctx, runtime.AgentSpec{Job: j.ID, Agent: reviewer, Cwd: wt.Path, Model: role.Model,
-			System: prompts.For("reviewer"), Role: "reviewer", Skills: skills.Dirs(role.Skills)})
+			System: prompts.System("reviewer"), Role: "reviewer", Skills: skills.Dirs(role.Skills)})
 		if err != nil {
 			return nil, fmt.Errorf("start reviewer: %w", err)
 		}
@@ -727,6 +742,7 @@ func (j *Job) review(ctx context.Context, wt *workspace.Worktree, round int) (*V
 		j.agents[reviewer] = r
 		j.mu.Unlock()
 	}
+	j.join(reviewer, fmt.Sprintf("the checks pass; review round %d of the builder's work", round))
 	// From the start commit, so a Symposium winner (already committed) shows too.
 	diff := wt.DiffFrom(j.base)
 	if len(diff) > 60000 {
@@ -734,11 +750,11 @@ func (j *Job) review(ctx context.Context, wt *workspace.Worktree, round int) (*V
 	}
 	var task string
 	if round == 1 {
-		task = fmt.Sprintf("Review round %d for ticket %s: %s\n\nThe task:\n%s\n\nChecks that passed: %s\n\nThe builder's handoff note:\n%s\n\nThe diff:\n```diff\n%s\n```\n\n"+
+		task = j.rosterBrief(reviewer) + fmt.Sprintf("Review round %d for ticket %s: %s\n\nThe task:\n%s\n\nChecks that passed: %s\n\nThe builder's handoff note:\n%s\n\nThe diff:\n```diff\n%s\n```\n\n"+
 			"Grill the builder on the decisions that matter with the ask_builder tool, one question at a time (at most %d), the way the grilling skill describes, then call verdict.",
 			round, j.ID, j.Title, j.Prompt, strings.Join(j.Checks, ", "), mustJSON(note), diff, maxAsks)
 	} else {
-		task = fmt.Sprintf("Review round %d. The builder says it fixed your findings and the checks pass again. The diff now:\n```diff\n%s\n```\n\nAsk what you still need with ask_builder (at most %d), then call verdict.", round, diff, maxAsks)
+		task = j.rosterBrief(reviewer) + fmt.Sprintf("Review round %d. The builder says it fixed your findings and the checks pass again. The diff now:\n```diff\n%s\n```\n\nAsk what you still need with ask_builder (at most %d), then call verdict.", round, diff, maxAsks)
 	}
 	if _, err := j.ask(ctx, r, task); err != nil {
 		return nil, fmt.Errorf("reviewer: %w", err)
@@ -857,7 +873,18 @@ func (j *Job) ask(ctx context.Context, a runtime.Agent, text string) (string, er
 }
 
 // prompt runs one turn, retrying when the connection to the model breaks.
+// While it runs the agent is busy: nobody else's question goes into its
+// session, so two agents never wait on each other.
 func (j *Job) prompt(ctx context.Context, a runtime.Agent, text string) (string, error) {
+	id, err := j.enter(a)
+	if err != nil {
+		return "", err
+	}
+	defer j.exit(id)
+	return j.promptRetry(ctx, a, text)
+}
+
+func (j *Job) promptRetry(ctx context.Context, a runtime.Agent, text string) (string, error) {
 	for try := 0; ; try++ {
 		out, err := a.Prompt(ctx, text)
 		if err == nil || try >= 2 || ctx.Err() != nil || !transient(err) {

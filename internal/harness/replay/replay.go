@@ -29,6 +29,7 @@ type Hooks interface {
 	SetVerdict(from string, v job.Verdict) error
 	Name(agent, title, project string) error
 	AskBuilder(from, question string) (string, error)
+	AskAgent(from, to, question string, sources []string) (string, error)
 	ProposeExperiments(from string, p job.Proposal) error
 	Grade(from, label string, score int, reason string) error
 }
@@ -210,6 +211,16 @@ func (r *Runtime) call(agent, cwd string, c record.Call) error {
 			return err
 		}
 		h.AskBuilder(agent, a.Question)
+	case "ask_agent":
+		var a struct {
+			To       string
+			Question string
+			Sources  []string
+		}
+		if err := json.Unmarshal(c.Args, &a); err != nil {
+			return err
+		}
+		h.AskAgent(agent, a.To, a.Question, a.Sources)
 	case "propose_experiments":
 		var p job.Proposal
 		if err := json.Unmarshal(c.Args, &p); err != nil {

@@ -517,7 +517,23 @@ func (s *Server) callTool(j *job.Job, agent, tool string, args []byte) (string, 
 		}
 		json.Unmarshal(args, &body)
 		s.Bus.Emit(j.ID, agent, "agent.status", map[string]any{"step": body.Step})
+		j.SetDoing(agent, body.Step)
 		return "ok", nil
+	case "roster":
+		if text := j.RosterFor(agent, true); text != "" {
+			return text, nil
+		}
+		return "", fmt.Errorf("you are not on this job's roster")
+	case "ask_agent":
+		var body struct {
+			To       string   `json:"to"`
+			Question string   `json:"question"`
+			Sources  []string `json:"sources"`
+		}
+		if err := json.Unmarshal(args, &body); err != nil {
+			return "", err
+		}
+		return j.AskAgent(agent, body.To, body.Question, body.Sources)
 	}
 	return "", fmt.Errorf("unknown tool %s", tool)
 }

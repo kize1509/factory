@@ -41,6 +41,12 @@ func passTool(p *patrol.Pass, agent, tool string, args []byte) (string, error) {
 		if tool == "set_status" {
 			return "ok", nil
 		}
+		if tool == "roster" {
+			return p.Roster(agent), nil
+		}
+		if tool == "ask_agent" {
+			return "", fmt.Errorf("patrol agents work alone and can't ask each other: record the check as blocked and say why in the note")
+		}
 		return "", fmt.Errorf("patrol agents have no tool %q", tool)
 	}
 	var b struct{ Run, Verdict, Note string }

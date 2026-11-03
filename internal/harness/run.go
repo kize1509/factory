@@ -433,7 +433,8 @@ func replayRepo(tmp string, meta Meta, o ReplayOptions) (string, error) {
 }
 
 // Metrics are the factory numbers that can be read straight from a job's
-// events: heal loops (checks.failed), wall time (first to last event, or
+// events: questions agents asked each other (asks), reads a builder repeated
+// after the planner had made them (redo_reads), heal loops (checks.failed), wall time (first to last event, or
 // elapsed when there are no events), and cost, tokens and model calls when
 // usage events exist. Cost is only set when usage was recorded; a replay has
 // none, so it reports what the recording had.
@@ -443,8 +444,26 @@ func Metrics(evs []events.Event, elapsed time.Duration) map[string]float64 {
 		m["wall_ms"] = float64(evs[len(evs)-1].Time.Sub(evs[0].Time).Milliseconds())
 	}
 	var usd, in, out, calls float64
+	m["asks"], m["redo_reads"] = 0, 0
+	planned := map[string]bool{} // paths the planner has looked at so far
 	for _, e := range evs {
 		switch e.Type {
+		case "agent.message":
+			if e.Data["kind"] == "question" {
+				m["asks"]++
+			}
+		case "agent.tool":
+			// work another agent already did: a builder reading what the planner read
+			path, ok := job.ReadPath(e)
+			if !ok {
+				break
+			}
+			switch {
+			case e.Agent == job.Planner:
+				planned[path] = true
+			case job.IsBuilder(e.Agent) && planned[path]:
+				m["redo_reads"]++
+			}
 		case "checks.failed":
 			m["heal_loops"]++
 		case "usage":

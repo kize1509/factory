@@ -253,14 +253,15 @@ func (j *Job) carryOn(ctx context.Context, wt *workspace.Worktree, r *Resume) (*
 		role := j.role("builder")
 		var err error
 		a, err = j.rtFor("builder").Start(ctx, runtime.AgentSpec{Job: j.ID, Agent: lead, Cwd: work.Path, Model: role.Model,
-			System: prompts.For("builder"), Role: "builder", Skills: skills.Dirs(role.Skills)})
+			System: prompts.System("builder"), Role: "builder", Skills: skills.Dirs(role.Skills)})
 		if err != nil {
 			return nil, nil, false, fmt.Errorf("start builder: %w", err)
 		}
 		j.mu.Lock()
 		j.agents[lead] = a
 		j.mu.Unlock()
-		msg = j.brief(r, work) + fmt.Sprintf("## Carry on\n\nYou pick this job up where it stopped. The work so far is in your working folder (%s). "+
+		j.join(lead, "you guided a stuck job and this builder carries it on")
+		msg = j.rosterBrief(lead) + j.brief(r, work) + fmt.Sprintf("## Carry on\n\nYou pick this job up where it stopped. The work so far is in your working folder (%s). "+
 			"Read the files changed so far before you change anything.\n\nThe person running the factory says, most recently:\n\n%s\n\n"+
 			"Follow that and finish the task. Scratch folder for logs and notes: %s\nWhen you're done, write your handoff with the handoff tool.",
 			work.Path, guidance, filepath.Join(j.Dir(), "scratch"))

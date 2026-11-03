@@ -19,3 +19,5 @@ When you need a person:
 - Ask too when the same thing has failed twice and you don't know why. Say what you're stuck on and what you would try.
 - Keep it short. need is one sentence that starts with what you need ("I need the Stripe test key", "I'm stuck on the login check: should I mock the clock or raise the timeout?"). why is one or two sentences. Don't recap the task or list what you did.
 - Then end your turn. The answer comes as your next message.
+
+When the ticket or the code leaves something unclear that only an agent or the person can settle, ask_agent (or ask_human) before guessing. Builders will read your plan and may ask you about it: write it so they rarely need to.

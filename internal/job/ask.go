@@ -46,7 +46,13 @@ func (j *Job) AskHuman(agent string, q Ask) error {
 		j.asks = map[string]*Ask{}
 	}
 	j.asks[agent] = &q
+	if m := j.roster[agent]; m != nil {
+		m.State = StateBlocked
+	}
+	snap := j.snapshotLocked()
 	j.mu.Unlock()
+	j.publish(snap)
+	j.send(Message{Kind: KindBlocker, From: agent, To: you, Text: strings.TrimSpace(q.Need + "\n" + q.Why)})
 	j.emit(agent, "agent.asked", map[string]any{"need": q.Need, "why": q.Why, "options": q.Options, "question": q.Markdown()})
 	return nil
 }

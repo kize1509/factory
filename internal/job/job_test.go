@@ -33,7 +33,7 @@ type fakeAgent struct {
 func (a *fakeAgent) Prompt(_ context.Context, text string) (string, error) {
 	a.prompts = append(a.prompts, text)
 	switch {
-	case strings.HasPrefix(text, "Ticket"):
+	case strings.Contains(text, "Ticket "):
 		os.WriteFile(filepath.Join(a.cwd, "app.txt"), []byte("half done\n"), 0o644)
 		os.WriteFile(filepath.Join(a.cwd, "app_test.go"), []byte("package x\n"), 0o644)
 		os.WriteFile(filepath.Join(a.cwd, "old_test.go"), []byte("package x // weakened\n"), 0o644)

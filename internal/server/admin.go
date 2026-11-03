@@ -185,7 +185,7 @@ type metrics struct {
 	Agents map[string]*bucket   `json:"agents"`
 	Tools  map[string]int       `json:"tools"`
 	Phases map[string]float64   `json:"phase_seconds"`
-	Edges  map[string]int       `json:"edges"` // "from>to" -> count
+	Edges  map[string]int       `json:"edges"` // "from>to>kind" -> count; older logs: "from>to"
 	Checks map[string]*checkTot `json:"checks"`
 	// Messages are the individual events behind Edges, newest last.
 	Messages []edgeMsg `json:"messages"`
@@ -196,7 +196,7 @@ type edgeMsg struct {
 	Time time.Time `json:"time"`
 	From string    `json:"from"`
 	To   string    `json:"to"`
-	Kind string    `json:"kind"` // handoff | check | you
+	Kind string    `json:"kind"` // question | answer | handover | blocker | handoff (old logs) | check | you
 	Text string    `json:"text"`
 }
 
@@ -260,6 +260,15 @@ func (s *Server) adminMetrics(w http.ResponseWriter, _ *http.Request) {
 		jm := jobMetric{ID: id, Title: titles[id]}
 		var phase string
 		var phaseStart, first, last time.Time
+		// jobs logged before agent.message existed draw their edges from the
+		// handoff events; newer ones from the messages, so nothing counts twice
+		hasMsgs := false
+		for _, e := range log {
+			if e.Type == "agent.message" {
+				hasMsgs = true
+				break
+			}
+		}
 		for _, e := range log {
 			if first.IsZero() {
 				first = e.Time
@@ -302,10 +311,17 @@ func (s *Server) adminMetrics(w http.ResponseWriter, _ *http.Request) {
 				jm.Loops++
 			case "handoff.written":
 				jm.Handoffs.Written++
-				if n, ok := d["note"].(map[string]any); ok {
+				if n, ok := d["note"].(map[string]any); ok && !hasMsgs {
 					to := strings.Fields(str(n["to"]) + " next")[0]
 					m.Edges[e.Agent+">"+to]++
 					m.Messages = append(m.Messages, edgeMsg{id, e.Time, e.Agent, to, "handoff", short(str(n["did"])+" → "+str(n["next"]), 200)})
+				}
+			case "agent.message":
+				// reports to operations say what an agent starts and finishes: too many for the graph
+				if to := str(d["to"]); str(d["kind"]) != "report" && str(d["from"]) != "" && to != "" {
+					from := str(d["from"])
+					m.Edges[from+">"+to+">"+str(d["kind"])]++
+					m.Messages = append(m.Messages, edgeMsg{id, e.Time, from, to, str(d["kind"]), short(str(d["text"]), 200)})
 				}
 			case "handoff.missing":
 				jm.Handoffs.Missing++

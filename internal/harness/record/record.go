@@ -96,7 +96,7 @@ func Load(root, agent string) ([]Turn, error) {
 // IsRuntimeEvent says whether a bus event came from a runtime, not from the
 // engine: replay puts these back on the bus, the engine makes the rest again.
 func IsRuntimeEvent(e events.Event) bool {
-	if e.Type == "agent.retry" {
+	if e.Type == "agent.retry" || e.Type == "agent.message" {
 		return false
 	}
 	for _, p := range []string{"agent.", "tool.", "message.", "pi.", "claude.", "codex."} {

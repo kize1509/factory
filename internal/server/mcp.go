@@ -42,6 +42,18 @@ var mcpTools = []map[string]any{
 		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"question": str_()}, "required": []string{"question"}},
 	},
 	{
+		"name": "ask_agent",
+		"description": "Ask another agent of this job one question and get its answer. Use it when your input is unclear: ask the agent that wrote it (the roster says who) before you guess. " +
+			"Use to \"operations\" when you don't know who to ask. It waits for the answer, then you carry on; an agent in the middle of its own turn can't answer, and you get at most 3 questions per turn. " +
+			"A credential, access or a decision only the person can make is ask_human, not this. sources: files, notes or diffs the question is about.",
+		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"to": str_(), "question": str_(), "sources": list_()}, "required": []string{"to", "question"}},
+	},
+	{
+		"name":        "roster",
+		"description": "Who is working on this job right now: their role, what they are doing and their state, whose output you read, who reads yours, and who to ask about what. Read-only.",
+		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{}},
+	},
+	{
 		"name": "propose_experiments",
 		"description": "When a task has two or more workable approaches and none is clearly best, or the ticket is vague: propose 2 to 4 experiments. " +
 			"The engine tries each on its own branch with its own builder, grades them blind and keeps the best.",

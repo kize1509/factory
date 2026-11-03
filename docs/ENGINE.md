@@ -176,6 +176,8 @@ Open questions left in a handoff note don't stop the job any more. They go on to
 
 The review step is described in §8. The other roles (research, planning, humanizer, finalizer, scheduler) come in M1. M0 proves the spine: worktree, Pi, gateway, checks, healing loop, handoff, events.
 
+Agents in a job share a roster and talk through one message envelope (`agent.message`), with the `roster` and `ask_agent` tools. The rules are in [AGENTS.md](AGENTS.md).
+
 ## 7. HTTP API (M0)
 
 | Method | Path | What it does |

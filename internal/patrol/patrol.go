@@ -483,3 +483,36 @@ func (p *Pass) RecordFor(agent, runID, verdict, note string) error {
 	}
 	return t.Record(runID, verdict, note)
 }
+
+// Roster is a patrol agent's view of the pass: its own check, and the checks
+// the other agents are running, sorted by agent name. Patrol agents don't
+// read from or write to each other; each reports to the ledger.
+func (p *Pass) Roster(agent string) string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	names := make([]string, 0, len(p.active))
+	for name := range p.active {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var b strings.Builder
+	fmt.Fprintf(&b, "## Your pass roster\n\nPass %s on project %s.\n", p.ID, p.Project)
+	if t := p.active[agent]; t != nil {
+		fmt.Fprintf(&b, "You are %s, checking %s with %s.\n", agent, t.Feature.ID, t.Technique)
+	}
+	b.WriteString("\nWho else is working:\n")
+	n := 0
+	for _, name := range names {
+		if name == agent {
+			continue
+		}
+		t := p.active[name]
+		fmt.Fprintf(&b, "- %s: checking %s with %s\n", name, t.Feature.ID, t.Technique)
+		n++
+	}
+	if n == 0 {
+		b.WriteString("- Nobody else right now.\n")
+	}
+	b.WriteString("\nYou read from nobody and write to the ledger: record_check is how you report. You can't ask the other agents; if you are stuck, record the check as blocked and say why.\n")
+	return b.String()
+}

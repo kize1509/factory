@@ -133,14 +133,19 @@ func (j *Job) runPlanner(ctx context.Context, wt *workspace.Worktree, reason str
 	j.set("planning")
 	role := j.role("planner")
 	a, err := j.rtFor("planner").Start(ctx, runtime.AgentSpec{Job: j.ID, Agent: planner, Cwd: wt.Path, Model: role.Model,
-		System: prompts.For("planner"), Role: "planner", Skills: skills.Dirs(role.Skills)})
+		System: prompts.System("planner"), Role: "planner", Skills: skills.Dirs(role.Skills)})
 	if err != nil {
 		return nil, nil, fmt.Errorf("start planner: %w", err)
 	}
 	j.mu.Lock()
 	j.agents[planner] = a
 	j.mu.Unlock()
-	task := fmt.Sprintf("Ticket %s: %s\n\n%s\n\n", j.ID, j.Title, j.Prompt)
+	because := "every job starts with a plan"
+	if reason != "" {
+		because = "this job counts as complex because " + reason
+	}
+	j.join(planner, because)
+	task := j.rosterBrief(planner) + fmt.Sprintf("Ticket %s: %s\n\n%s\n\n", j.ID, j.Title, j.Prompt)
 	j.mu.Lock()
 	named := j.named
 	j.mu.Unlock()
@@ -222,6 +227,16 @@ func (j *Job) symposium(ctx context.Context, base *workspace.Worktree, p *Propos
 
 	role := j.role("builder")
 	results := make([]*expResult, len(p.Experiments))
+	// everyone is on the roster before the first one starts, so each builder
+	// sees the same team
+	j.mu.Lock()
+	for i := range p.Experiments {
+		j.inExperiment[experimentBuilders[i]] = true
+	}
+	j.mu.Unlock()
+	for i, e := range p.Experiments {
+		j.join(experimentBuilders[i], fmt.Sprintf("it tests hypothesis %d of the Symposium: %s", i+1, e.Name))
+	}
 	var wg sync.WaitGroup
 	for i, e := range p.Experiments {
 		r := &expResult{Index: i + 1, Label: string(rune('A' + i)), Name: e.Name, Agent: experimentBuilders[i],
@@ -233,7 +248,7 @@ func (j *Job) symposium(ctx context.Context, base *workspace.Worktree, p *Propos
 		}
 		r.wt = wt
 		a, err := j.rt.Start(ctx, runtime.AgentSpec{Job: j.ID, Agent: r.Agent, Cwd: wt.Path, Model: role.Model,
-			System: prompts.For("builder"), Role: "builder", Skills: skills.Dirs(role.Skills)})
+			System: prompts.System("builder"), Role: "builder", Skills: skills.Dirs(role.Skills)})
 		if err != nil {
 			return nil, fmt.Errorf("start %s: %w", r.Agent, err)
 		}
@@ -272,7 +287,9 @@ func (j *Job) symposium(ctx context.Context, base *workspace.Worktree, p *Propos
 			r.wt.Remove()
 			j.mu.Lock()
 			delete(j.agents, r.Agent)
+			delete(j.inExperiment, r.Agent)
 			j.mu.Unlock()
+			j.depart(r.Agent)
 		}
 	}
 	if winner == nil {
@@ -287,7 +304,7 @@ func (j *Job) symposium(ctx context.Context, base *workspace.Worktree, p *Propos
 }
 
 func (j *Job) runExperiment(ctx context.Context, r *expResult, e Experiment, baseSHA string) {
-	task := fmt.Sprintf("Ticket %s: %s\n\n%s\n\nYou are testing one hypothesis in experiment %d of a Symposium: %s.\nHypothesis: %s\nApproach: %s\nSignal that it works: %s\n\n"+
+	task := j.rosterBrief(r.Agent) + fmt.Sprintf("Ticket %s: %s\n\n%s\n\nYou are testing one hypothesis in experiment %d of a Symposium: %s.\nHypothesis: %s\nApproach: %s\nSignal that it works: %s\n\n"+
 		"Build only this approach, as well as you can. Other builders try the other approaches on their own branches; the engine compares the results.\n"+
 		"Scratch folder for logs: %s\nThe engine will check your work with: %s",
 		j.ID, j.Title, j.Prompt, r.Index, e.Name, e.Hypothesis, e.Approach, e.SuccessSignal,
@@ -358,12 +375,22 @@ func (j *Job) gradeExperiments(ctx context.Context, base *workspace.Worktree, re
 	}
 	j.set("grading")
 	a, err := rt.Start(ctx, runtime.AgentSpec{Job: j.ID, Agent: grader, Cwd: base.Path, Model: role.Model,
-		System: prompts.For("reviewer"), Role: "reviewer", Skills: skills.Dirs(role.Skills)})
+		System: prompts.System("reviewer"), Role: "reviewer", Skills: skills.Dirs(role.Skills)})
 	if err != nil {
 		j.emit(grader, "grading.failed", map[string]any{"error": err.Error()})
 		return
 	}
-	defer a.Stop()
+	j.mu.Lock()
+	j.agents[grader] = a
+	j.mu.Unlock()
+	defer func() {
+		a.Stop()
+		j.mu.Lock()
+		delete(j.agents, grader)
+		j.mu.Unlock()
+		j.depart(grader)
+	}()
+	j.join(grader, "it grades the experiments blind, by their letters")
 	j.mu.Lock()
 	j.labels, j.grades = map[string]int{}, map[string]int{}
 	for _, r := range in {
@@ -371,6 +398,7 @@ func (j *Job) gradeExperiments(ctx context.Context, base *workspace.Worktree, re
 	}
 	j.mu.Unlock()
 	var b strings.Builder
+	b.WriteString(j.rosterBrief(grader))
 	fmt.Fprintf(&b, "Grade %d experiments for ticket %s: %s\n\nThe task:\n%s\n\n", len(in), j.ID, j.Title, j.Prompt)
 	for _, r := range in {
 		d := r.diff

@@ -26,6 +26,13 @@ func For(role string) string {
 	return Default(role)
 }
 
+// System is the system prompt an agent of a job starts with: its role's
+// prompt, then the team rules (roles/team.md). The rules are appended here, so
+// your own version of a role's prompt doesn't drop them.
+func System(role string) string {
+	return strings.TrimRight(For(role), "\n") + "\n\n" + strings.TrimRight(For("team"), "\n") + "\n"
+}
+
 func Default(role string) string {
 	data, _ := defaults.ReadFile("roles/" + role + ".md")
 	return string(data)
