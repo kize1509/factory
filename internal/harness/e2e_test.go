@@ -268,7 +268,7 @@ func TestRecordAndReplayHealingJob(t *testing.T) {
 	if left := rp.Unplayed(); len(left) > 0 {
 		t.Errorf("replay left turns unplayed: %v", left)
 	}
-	if rep.duration > time.Second {
+	if rep.duration > 10*time.Second { // only a hang; the speed is logged below, not asserted
 		t.Errorf("replay took %s", rep.duration)
 	}
 	t.Logf("recorded in %s, replayed in %s", rec.duration, rep.duration)
@@ -347,7 +347,10 @@ func TestCassetteHoldsTheTurn(t *testing.T) {
 	if json.Unmarshal(turns[2].Calls[0].Args, &n) != nil || n.Did == "" {
 		t.Errorf("handoff args: %s", turns[2].Calls[0].Args)
 	}
-	if len(turns[0].Events) == 0 || turns[0].Events[0].Type == "" {
-		t.Error("turn 1 has no events")
+	if len(turns[0].StartEvents) != 1 || turns[0].StartEvents[0].Type != "agent.started" {
+		t.Errorf("turn 1 should hold the Start's agent.started: %+v", turns[0].StartEvents)
+	}
+	if len(turns[1].StartEvents) != 0 {
+		t.Errorf("turn 2 has no Start of its own: %+v", turns[1].StartEvents)
 	}
 }

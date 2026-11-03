@@ -32,17 +32,18 @@ type Call struct {
 
 // Turn is one Prompt call.
 type Turn struct {
-	Agent      string         `json:"agent"`
-	N          int            `json:"n"` // 1-based, per agent, across restarts of that agent
-	Prompt     string         `json:"prompt"`
-	Reply      string         `json:"reply"`
-	Error      string         `json:"error,omitempty"`
-	Events     []events.Event `json:"events,omitempty"` // everything on the bus during the turn (the first turn also has the Start's)
-	Calls      []Call         `json:"calls,omitempty"`
-	Cwd        string         `json:"cwd,omitempty"` // where the agent worked when recorded; evidence only
-	TreeBefore string         `json:"tree_before,omitempty"`
-	TreeAfter  string         `json:"tree_after,omitempty"`
-	Diff       string         `json:"diff,omitempty"` // git diff --binary TreeBefore TreeAfter
+	Agent       string         `json:"agent"`
+	N           int            `json:"n"` // 1-based, per agent, across restarts of that agent
+	Prompt      string         `json:"prompt"`
+	Reply       string         `json:"reply"`
+	Error       string         `json:"error,omitempty"`
+	StartEvents []events.Event `json:"start_events,omitempty"` // bus events during the Start that began the agent this turn is the first for
+	Events      []events.Event `json:"events,omitempty"`       // everything on the bus during the turn
+	Calls       []Call         `json:"calls,omitempty"`
+	Cwd         string         `json:"cwd,omitempty"` // where the agent worked when recorded; evidence only
+	TreeBefore  string         `json:"tree_before,omitempty"`
+	TreeAfter   string         `json:"tree_after,omitempty"`
+	Diff        string         `json:"diff,omitempty"` // git diff --binary TreeBefore TreeAfter
 }
 
 const repoToken = "{{repo}}"
@@ -115,14 +116,14 @@ type Runtime struct {
 
 	mu      sync.Mutex
 	counts  map[string]int
-	current map[string]*[]Call // agent -> calls of the turn it is in
-	cwd     map[string]string  // agent -> where it works
-	startAt map[string]int     // agent -> bus length when it started, until its first turn is written
+	current map[string]*[]Call        // agent -> calls of the turn it is in
+	cwd     map[string]string         // agent -> where it works
+	started map[string][]events.Event // agent -> events its Start emitted, until its next turn is written
 }
 
 // New wraps inner. Call Attach once the job exists.
 func New(inner runtime.Runtime, bus *events.Bus, root string) *Runtime {
-	return &Runtime{Inner: inner, Bus: bus, Root: root, counts: map[string]int{}, current: map[string]*[]Call{}, startAt: map[string]int{}, cwd: map[string]string{}}
+	return &Runtime{Inner: inner, Bus: bus, Root: root, counts: map[string]int{}, current: map[string]*[]Call{}, started: map[string][]events.Event{}, cwd: map[string]string{}}
 }
 
 // Attach makes the job report its tool calls to the recorder.
@@ -149,11 +150,13 @@ func (r *Runtime) Start(ctx context.Context, spec runtime.AgentSpec) (runtime.Ag
 	if err != nil {
 		return nil, err
 	}
+	var startEvs []events.Event
+	if evs, _ := r.Bus.Replay(spec.Job); at <= len(evs) {
+		startEvs = evs[at:]
+	}
 	r.mu.Lock()
 	r.cwd[spec.Agent] = spec.Cwd
-	if _, ok := r.startAt[spec.Agent]; !ok {
-		r.startAt[spec.Agent] = at
-	}
+	r.started[spec.Agent] = startEvs
 	r.mu.Unlock()
 	return &agent{r: r, in: a, spec: spec}, nil
 }
@@ -171,21 +174,19 @@ func (a *agent) Prompt(ctx context.Context, text string) (string, error) {
 	r, name := a.r, a.spec.Agent
 	before, _ := Snapshot(a.spec.Cwd)
 	r.mu.Lock()
-	from, started := r.startAt[name]
-	delete(r.startAt, name)
+	startEvs := r.started[name]
+	delete(r.started, name)
 	calls := &[]Call{}
 	prev := r.current[name]
 	r.current[name] = calls
 	r.counts[name]++
 	n := r.counts[name]
 	r.mu.Unlock()
-	if !started {
-		from = r.busLen(a.spec.Job)
-	}
+	from := r.busLen(a.spec.Job)
 
 	reply, err := a.in.Prompt(ctx, text)
 
-	t := Turn{Agent: name, N: n, Prompt: Normalize(text, a.spec.Cwd), Reply: Normalize(reply, a.spec.Cwd), Cwd: a.spec.Cwd, TreeBefore: before}
+	t := Turn{StartEvents: startEvs, Agent: name, N: n, Prompt: Normalize(text, a.spec.Cwd), Reply: Normalize(reply, a.spec.Cwd), Cwd: a.spec.Cwd, TreeBefore: before}
 	if err != nil {
 		t.Error = err.Error()
 	}

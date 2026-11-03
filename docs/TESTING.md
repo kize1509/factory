@@ -17,6 +17,7 @@ A **cassette** is `.factory/jobs/<job>/cassette/<agent>/<n>.json`, one file per 
 |---|---|
 | `prompt`, `reply`, `error` | the turn's input and output |
 | `calls` | factory tool calls made during the turn, in order |
+| `start_events` | bus events emitted by the `Start` that began the agent (first turn after each start); replay emits them in its own `Start` |
 | `events` | everything on the bus during the turn (runtime events are re-emitted on replay, the engine makes its own again) |
 | `tree_before`, `tree_after`, `diff` | worktree tree hashes and `git diff --binary` between them |
 
@@ -31,11 +32,13 @@ Pieces (all in `internal/harness/`):
 
 **Drift fails loudly.** If the engine's prompt differs from the recording, replay returns a `*replay.Drift` error and the job gets stuck with a line diff (`-` recorded, `+` now). That is the signal that a prompt, role or engine change altered behaviour. It is also how you bisect: replay the same cassette on two commits and the first one that drifts is the one that changed the conversation.
 
-What replay proves: the engine, given the same agent behaviour, produces the same events, tree, commit and handoff. What it cannot prove: that a model would behave this way under the new prompt. That is what evals (Part 4) and live runs (Part 2) are for.
+What replay proves: the engine, given the same agent behaviour, produces the same worktree tree, commit, handoff note, job state and order of engine events. For scripted agents the whole event-type sequence matches (the e2e test asserts it). For real runtimes the order of *runtime* events is only approximate (see Known limits). What it cannot prove: that a model would behave this way under the new prompt. That is what evals (Part 4) and live runs (Part 2) are for.
 
 Known limits of this first slice:
 
 - `ask_human` is not recorded. A job that waits on a person can't replay without an answer; record the answer as a guidance turn later.
+- Runtime event order is approximate. Replay emits a turn's recorded runtime events in one burst at the start of the turn, not interleaved with the work. Events a real runtime emits asynchronously between turns (Pi emits from a goroutine) fall into no turn's slice and are lost; events that arrive late land in the next turn. Only engine events keep their exact order.
+- Replay speed is not asserted anywhere: the e2e test only fails on a hang (10s) and logs the time.
 - Parallel Symposium experiments share one bus, so event slices per turn can interleave. Tool calls and diffs stay correct (they are per agent and per worktree).
 - Runtime events are told apart from engine events by type prefix (`agent.`, `tool.`, `message.`, `pi.`, `claude.`, `codex.`; `agent.retry` is the engine's). A new runtime event family needs adding to `record.IsRuntimeEvent`.
 - Timing and cost in a cassette are what was recorded. Replay is for behaviour, not for speed or spend numbers.

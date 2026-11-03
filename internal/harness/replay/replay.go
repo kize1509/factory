@@ -78,8 +78,19 @@ func (r *Runtime) turns(agent string) ([]record.Turn, error) {
 }
 
 func (r *Runtime) Start(_ context.Context, spec runtime.AgentSpec) (runtime.Agent, error) {
-	if _, err := r.turns(spec.Agent); err != nil {
+	ts, err := r.turns(spec.Agent)
+	if err != nil {
 		return nil, err
+	}
+	r.mu.Lock()
+	i := r.next[spec.Agent]
+	r.mu.Unlock()
+	if r.Bus != nil && i < len(ts) { // what the real Start emitted, at Start
+		for _, e := range ts[i].StartEvents {
+			if e.Agent == spec.Agent && record.IsRuntimeEvent(e) {
+				r.Bus.Emit(spec.Job, spec.Agent, e.Type, e.Data)
+			}
+		}
 	}
 	return &agent{r: r, spec: spec}, nil
 }
