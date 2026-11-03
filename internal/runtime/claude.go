@@ -53,7 +53,8 @@ func (c *Claude) Start(ctx context.Context, s AgentSpec) (Agent, error) {
 	}
 	cmd := exec.Command("claude", args...)
 	cmd.Dir = s.Cwd
-	cmd.Env = append(os.Environ(), "ANTHROPIC_BASE_URL="+fmt.Sprintf("%s/llm/%s/%s/claude-code/anthropic", c.Engine, s.Job, s.Agent))
+	cmd.Env = append(os.Environ(), "ANTHROPIC_BASE_URL="+fmt.Sprintf("%s/llm/%s/%s/claude-code/anthropic", c.Engine, s.Job, s.Agent),
+		"MCP_TOOL_TIMEOUT=600000") // ask_ops waits while Hermes works
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Stderr = os.Stderr
 	in, err := cmd.StdinPipe()

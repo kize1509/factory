@@ -166,6 +166,7 @@ Each philosopher has a 32×32 bust, a 4-frame talking version of it (mouth close
 | `portrait/protagoras` | Humanizer | Smiling, speaker's hand raised, red cloak |
 | `portrait/isocrates` | Humanizer | Elderly, clean robes, quill |
 | `portrait/xenophon` | Finalizer | Soldier's helmet pushed back, writing tablet |
+| `portrait/hermes` | Operations | Winged bronze cap, staff; carries news between agents and runs the tracker |
 | `portrait/solomun` | DJ | Short dark hair and beard, black shirt, headphones with red cups |
 | `portrait/homer` | Narrator | Long grey hair and beard, olive band, white robe |
 

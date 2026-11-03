@@ -32,6 +32,9 @@ var Philosophers = []Philosopher{
 	{"protagoras", "Protagoras", "humanizer", "curly", HairDark, "short", HairDark, ClothRed, Clear, "hand"},
 	{"isocrates", "Isocrates", "humanizer", "receding", HairGrey, "long", HairGrey, Marble, Clear, "quill"},
 	{"xenophon", "Xenophon", "finalizer", "helmet", Bronze, "short", HairDark, ClothBlue, Clear, "tablet"},
+	// Hermes carries news between agents and runs the tracker: a winged cap
+	// (the helmet look in bronze) and a staff.
+	{"hermes", "Hermes", "ops", "helmet", Bronze, "none", Clear, ClothBlue, Clear, "staff"},
 	// Homer narrates what is happening and why.
 	{"homer", "Homer", "narrator", "long", HairGrey, "long", HairGrey, Marble, Olive, "none"},
 	// DJs play sets at the Theatre.

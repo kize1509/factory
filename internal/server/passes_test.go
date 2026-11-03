@@ -3,10 +3,13 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"testing"
 
+	"factory/internal/events"
 	"factory/internal/harness/fixture"
 	"factory/internal/patrol"
 	"factory/internal/store"
@@ -46,5 +49,33 @@ func TestLedgerAPIAndStopAll(t *testing.T) {
 	h.ServeHTTP(w, httptest.NewRequest("GET", "/api/passes/P9", nil))
 	if w.Code != 200 {
 		t.Fatal(w.Code, w.Body)
+	}
+}
+
+func TestOpsDraftRoutes(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "f.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	s := &Server{Store: db, Bus: events.NewBus(t.TempDir())}
+	h := s.Handler()
+	id, _ := db.AddDraft(store.Draft{Repo: "/r", Job: "J", Agent: "hermes", Action: "comment", Args: []byte(`{"kind":"comment","issue":"HF-1","text":"x"}`), Summary: "Comment on HF-1: x"})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/ops/drafts?state=pending", nil))
+	var out struct{ Drafts []store.Draft }
+	json.Unmarshal(rec.Body.Bytes(), &out)
+	if len(out.Drafts) != 1 || out.Drafts[0].ID != id {
+		t.Fatalf("%s", rec.Body)
+	}
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "/api/ops/drafts/"+strconv.FormatInt(id, 10)+"/reject", nil))
+	if rec.Code != 200 {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "/api/ops/drafts/"+strconv.FormatInt(id, 10)+"/reject", nil))
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("a second reject should conflict, got %d", rec.Code)
 	}
 }

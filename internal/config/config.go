@@ -20,6 +20,51 @@ type Project struct {
 	Limits struct {
 		BuildLoops int `yaml:"build_loops"`
 	} `yaml:"limits"`
+	Tracker Tracker `yaml:"tracker"`
+}
+
+// Tracker maps the factory project to a YouTrack project and says how far
+// the operations agent may go (PRD §13). The URL and token stay in settings.
+type Tracker struct {
+	Kind    string `yaml:"kind"`    // youtrack; empty means no tracker
+	Project string `yaml:"project"` // YouTrack project short name, e.g. HF
+	Level   string `yaml:"level"`   // observe | propose | file | fix; default fix
+	States  struct {
+		Working string `yaml:"working"` // an empty name means: don't move
+		Blocked string `yaml:"blocked"`
+		Review  string `yaml:"review"`
+		Done    string `yaml:"done"`
+	} `yaml:"states"`
+	MaxCreatedPerJob  int `yaml:"max_created_per_job"`
+	MaxCreatedPerPass int `yaml:"max_created_per_pass"`
+}
+
+// Control levels, from least to most the operations agent may do.
+var Levels = []string{"observe", "propose", "file", "fix"}
+
+// ValidLevel returns the level in lower case, "" when it isn't one.
+func ValidLevel(l string) string {
+	l = strings.ToLower(strings.TrimSpace(l))
+	for _, ok := range Levels {
+		if l == ok {
+			return l
+		}
+	}
+	return ""
+}
+
+// Normalised fills in the defaults: level fix, five issues per job, ten per pass.
+func (t Tracker) Normalised() Tracker {
+	if t.Level = ValidLevel(t.Level); t.Level == "" {
+		t.Level = "fix"
+	}
+	if t.MaxCreatedPerJob <= 0 {
+		t.MaxCreatedPerJob = 5
+	}
+	if t.MaxCreatedPerPass <= 0 {
+		t.MaxCreatedPerPass = 10
+	}
+	return t
 }
 
 const Template = `# Factory settings for this repo. See docs/PRD.md §13.
@@ -28,6 +73,13 @@ checks:
   saved_plan: []          # e.g. ["go test ./..."]; empty means the job asks
 limits:
   build_loops: 4
+# tracker:                # lets the operations agent (Hermes) run the board
+#   kind: youtrack        # the URL and token are in Admin → Connections
+#   project: ABC          # the YouTrack project for this repo
+#   level: fix            # observe | propose | file | fix
+#   states: {working: "In Progress", blocked: "", review: "In Review", done: "Done"}  # "" means don't move
+#   max_created_per_job: 5
+#   max_created_per_pass: 10
 `
 
 // ShipModes are the ways a job's work can leave the factory.
@@ -64,12 +116,20 @@ func LoadProject(repo string) (Project, error) {
 
 // Engine is ~/.factory/settings.json, edited in the admin panel.
 type Engine struct {
-	Wire     string              `json:"wire,omitempty"`  // Central wire prefix; found automatically when empty
-	Model    string              `json:"model,omitempty"` // fallback model for roles without one
-	Roles    map[string]Role     `json:"roles,omitempty"`
-	Skills   map[string][]string `json:"skills,omitempty"` // role -> skill names
-	YouTrack YouTrack            `json:"youtrack"`
-	Limits   Limits              `json:"limits"`
+	Wire  string          `json:"wire,omitempty"`  // Central wire prefix; found automatically when empty
+	Model string          `json:"model,omitempty"` // fallback model for roles without one
+	Roles map[string]Role `json:"roles,omitempty"`
+	// Projects overrides roles for one repo (by path), e.g. a cheaper
+	// operations model for a small project.
+	Projects map[string]ProjectRoles `json:"projects,omitempty"`
+	Skills   map[string][]string     `json:"skills,omitempty"` // role -> skill names
+	YouTrack YouTrack                `json:"youtrack"`
+	Limits   Limits                  `json:"limits"`
+}
+
+// ProjectRoles are the role settings one project overrides.
+type ProjectRoles struct {
+	Roles map[string]Role `json:"roles,omitempty"`
 }
 
 // Role says which runtime and model play a role (PRD §12.2).
@@ -91,7 +151,7 @@ type Limits struct {
 }
 
 // RoleNames lists the roles in pipeline order.
-var RoleNames = []string{"scheduler", "researcher", "planner", "builder", "executor", "reviewer", "humanizer", "finalizer"}
+var RoleNames = []string{"scheduler", "ops", "researcher", "planner", "builder", "executor", "reviewer", "humanizer", "finalizer"}
 
 // DefaultRoles follows D29 and D31: Pi everywhere, the Claude model of
 // each role's tier.
@@ -101,6 +161,7 @@ func DefaultRoles() map[string]Role {
 		"scheduler": {"pi", think}, "planner": {"pi", think}, "reviewer": {"pi", think},
 		"researcher": {"pi", code}, "builder": {"pi", code}, "humanizer": {"pi", code},
 		"executor": {"pi", execute}, "finalizer": {"pi", execute},
+		"ops": {"pi", "openai/gpt-6.1-terra"}, // Hermes, the operations agent (D2, D29)
 	}
 }
 
@@ -157,6 +218,15 @@ func (e Engine) RoleFor(name string) Role {
 		return r
 	}
 	return DefaultRoles()[name]
+}
+
+// RoleForProject returns the role for one repo: its override if it has
+// one, else the engine-wide setting.
+func (e Engine) RoleForProject(repo, name string) Role {
+	if r, ok := e.Projects[repo].Roles[name]; ok && r.Model != "" {
+		return r
+	}
+	return e.RoleFor(name)
 }
 
 func Home() string {

@@ -56,8 +56,8 @@ Agents that run unattended leave no record a person can follow afterwards.
 
 | # | Decision |
 |---|---|
-| D1 | The Go engine does all the legwork: scheduling, process control, git, tracker calls, the event log and the web server. |
-| D2 | The Go engine is the only control plane. Every trigger, timer, webhook, process start and stop, retry, phase change, message and upload passes through it. Agents, including the scheduler agent, send requests. The engine decides and acts. |
+| D1 | The Go engine does all the legwork: scheduling, process control, git, tracker calls, the event log and the web server. Tracker calls run on behalf of the operations agent (D2), through the engine's tracker client. |
+| D2 | The Go engine is the only control plane. Every trigger, timer, webhook, process start and stop, retry, phase change, message and upload passes through it. Agents, including the scheduler agent, send requests. The agent decides, the engine executes: the operations agent (Hermes, role `ops`) gets a typed set of tracker tools (create, search, read, comment, update, move, link, attach), and the engine runs each call through its tracker client, keeps the token, logs every call as an event and enforces the limits (mapped project, cap on issues created, control level, no deleting). Agents never see the token and never send raw tracker commands. |
 | D3 | No new tests by default. When a job starts, agents list every existing way to check the result. The user picks which ones to use, picks none, or asks for a new check built for this job. |
 | D4 | Ship mode is set per project: `commit`, `push` or `pr`. The default is `pr` (commit, push and open a PR). |
 | D5 | Plan approval happens only on request. The user gives a complexity hint at the start. If the task is complex and the user wants to iterate on the plan, the engine waits for approval. |
@@ -93,7 +93,7 @@ Agents that run unattended leave no record a person can follow afterwards.
 | D35 | Clicking an agent always shows its live internal thoughts. You can send it information from there at any moment, which interrupts its current step. A UFO flies in and beams the message down, so you can see on the map who just got new input. |
 | D36 | The engine tracks every process and container pod an agent starts: command, pid or container id, port, CPU, memory, run time and exit code. You can see them per agent and across all cities, and stop any of them. |
 | D37 | An agent that needs you can't be missed: it waves, its bubble pulses with a "Needs you" tag, its city's chip pulses, and on the Aegean its city sends up a beacon. Clicking it and answering sends the reply by UFO, and it goes back to work. |
-| D38 | Information passes between agents only through handoff notes with a fixed shape (§7.6). The engine checks every note. If one is missing or incomplete, the engine sends the same agent back, in the same session, to write it. A note with open questions stops the job until they are answered. |
+| D38 | Information passes between agents only through handoff notes with a fixed shape (§7.6). The engine checks every note. If one is missing or incomplete, the engine sends the same agent back, in the same session, to write it. A note with open questions stops the job until they are answered. The operations agent adds a handover on top when work moves between agents (planner to builder, builder to reviewer, a stuck job to its retry): it gathers the context, decisions, open points and links. It adds to the handoff note and never replaces it. If it is unavailable, the next agent gets the plain note. |
 
 ## 6. Concepts
 
@@ -282,6 +282,7 @@ Each job has limits on loops per phase, tokens, cost and wall time. The job stop
 | Reviewer | Socrates (criteria really met), Diogenes (hardcoding and shortcuts), Zeno (edge cases), Heraclitus (simplicity) | Read-only review with one focus each. Also grades Symposium branches. Looks for code shaped to the prompt or to the checks, special cases for check inputs, and edits to check files. | yes, one per focus |
 | Humanizer | Protagoras, Isocrates | Runs the humanizer skill on prompts, docs, comments and PR text. | yes |
 | Finalizer | Xenophon | Cleans up docs, commits, pushes, opens the PR, updates the ticket. | one |
+| Operations | Hermes | Runs the tracker (creates, reads, moves and comments on issues), keeps project knowledge, answers other agents with sources and hands work over between them (D2, ENGINE.md §8.6). | one per job or pass |
 
 Each role's prompt is a short markdown file (`prompts/<role>.md`). Config sets which runtime plays which role.
 

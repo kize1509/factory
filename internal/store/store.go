@@ -86,6 +86,35 @@ CREATE TABLE IF NOT EXISTS ledger (
 );
 CREATE INDEX IF NOT EXISTS ledger_pass ON ledger(pass, id);
 CREATE INDEX IF NOT EXISTS ledger_repo ON ledger(repo, feature, technique);
+CREATE TABLE IF NOT EXISTS ops_notes (
+  id      INTEGER PRIMARY KEY AUTOINCREMENT,
+  repo    TEXT,
+  job     TEXT,                    -- the job or pass the note belongs to
+  issue   TEXT,                    -- tickets it is about, comma separated
+  agent   TEXT,
+  kind    TEXT NOT NULL,           -- did, decision, finding, blocker, user_note, answer
+  text    TEXT NOT NULL,
+  seq     INTEGER,                 -- the event it came from, when there is one
+  created TEXT
+);
+CREATE INDEX IF NOT EXISTS ops_notes_repo ON ops_notes(repo, id);
+CREATE TABLE IF NOT EXISTS ops_drafts (
+  id      INTEGER PRIMARY KEY AUTOINCREMENT,
+  repo    TEXT,
+  job     TEXT,
+  agent   TEXT,
+  action  TEXT NOT NULL,           -- create, update, move, comment, link, attach
+  args    TEXT NOT NULL,           -- JSON
+  summary TEXT,                    -- the action in plain words
+  state   TEXT NOT NULL,           -- pending, approved, rejected, failed
+  result  TEXT,                    -- the issue ID, or the error
+  created TEXT
+);
+CREATE TABLE IF NOT EXISTS ops_created (
+  issue   TEXT PRIMARY KEY,        -- tickets Hermes created
+  job     TEXT,
+  created TEXT
+);
 CREATE TABLE IF NOT EXISTS prices (
   model       TEXT PRIMARY KEY,    -- provider/id, e.g. anthropic/claude-sonnet-5-5
   input       REAL NOT NULL,       -- US dollars per million tokens
@@ -346,4 +375,166 @@ func (s *Store) Prices() ([]Price, error) {
 		out = append(out, p)
 	}
 	return out, rows.Err()
+}
+
+// Note is one piece of project knowledge the operations agent holds.
+type Note struct {
+	ID      int64  `json:"id"`
+	Repo    string `json:"repo"`
+	Job     string `json:"job"`
+	Issue   string `json:"issue,omitempty"`
+	Agent   string `json:"agent"`
+	Kind    string `json:"kind"`
+	Text    string `json:"text"`
+	Seq     int64  `json:"seq,omitempty"`
+	Created string `json:"created"`
+}
+
+// AddNote stores a note.
+func (s *Store) AddNote(n Note) error {
+	_, err := s.db.Exec(`INSERT INTO ops_notes(repo, job, issue, agent, kind, text, seq, created) VALUES(?,?,?,?,?,?,?,?)`,
+		n.Repo, n.Job, n.Issue, n.Agent, n.Kind, n.Text, n.Seq, time.Now().Format(time.RFC3339Nano))
+	return err
+}
+
+// Notes returns a repo's notes, newest first. A non-empty word list keeps
+// the notes that contain any of the words (case-insensitive); job and issue
+// narrow it further when set.
+func (s *Store) Notes(repo, job, issue string, words []string, limit int) ([]Note, error) {
+	q := `SELECT id, COALESCE(repo,''), COALESCE(job,''), COALESCE(issue,''), COALESCE(agent,''), kind, text, COALESCE(seq,0), COALESCE(created,'') FROM ops_notes WHERE 1=1`
+	var args []any
+	if repo != "" {
+		q += ` AND repo=?`
+		args = append(args, repo)
+	}
+	if job != "" {
+		q += ` AND job=?`
+		args = append(args, job)
+	}
+	if issue != "" {
+		q += ` AND (',' || issue || ',') LIKE ?`
+		args = append(args, "%,"+issue+",%")
+	}
+	if len(words) > 0 {
+		q += ` AND (`
+		for i, w := range words {
+			if i > 0 {
+				q += ` OR `
+			}
+			q += `LOWER(text) LIKE ? OR LOWER(issue) LIKE ?`
+			args = append(args, "%"+strings.ToLower(w)+"%", "%"+strings.ToLower(w)+"%")
+		}
+		q += `)`
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	q += ` ORDER BY id DESC LIMIT ?`
+	args = append(args, limit)
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Note
+	for rows.Next() {
+		var n Note
+		if err := rows.Scan(&n.ID, &n.Repo, &n.Job, &n.Issue, &n.Agent, &n.Kind, &n.Text, &n.Seq, &n.Created); err != nil {
+			return nil, err
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
+}
+
+// Draft is a tracker write waiting for your approval (the Propose level).
+type Draft struct {
+	ID      int64           `json:"id"`
+	Repo    string          `json:"repo"`
+	Job     string          `json:"job"`
+	Agent   string          `json:"agent"`
+	Action  string          `json:"action"`
+	Args    json.RawMessage `json:"args"`
+	Summary string          `json:"summary"`
+	State   string          `json:"state"`
+	Result  string          `json:"result,omitempty"`
+	Created string          `json:"created"`
+}
+
+// AddDraft stores a pending draft and returns its id.
+func (s *Store) AddDraft(d Draft) (int64, error) {
+	res, err := s.db.Exec(`INSERT INTO ops_drafts(repo, job, agent, action, args, summary, state, created) VALUES(?,?,?,?,?,?,'pending',?)`,
+		d.Repo, d.Job, d.Agent, d.Action, string(d.Args), d.Summary, time.Now().Format(time.RFC3339Nano))
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+// Drafts lists drafts, newest first; state "" lists all.
+func (s *Store) Drafts(state string) ([]Draft, error) {
+	q := `SELECT id, COALESCE(repo,''), COALESCE(job,''), COALESCE(agent,''), action, args, COALESCE(summary,''), state, COALESCE(result,''), COALESCE(created,'') FROM ops_drafts`
+	var args []any
+	if state != "" {
+		q += ` WHERE state=?`
+		args = append(args, state)
+	}
+	rows, err := s.db.Query(q+` ORDER BY id DESC`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Draft
+	for rows.Next() {
+		var d Draft
+		var a string
+		if err := rows.Scan(&d.ID, &d.Repo, &d.Job, &d.Agent, &d.Action, &a, &d.Summary, &d.State, &d.Result, &d.Created); err != nil {
+			return nil, err
+		}
+		d.Args = json.RawMessage(a)
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// Draft returns one draft.
+func (s *Store) Draft(id int64) (Draft, error) {
+	all, err := s.Drafts("")
+	if err != nil {
+		return Draft{}, err
+	}
+	for _, d := range all {
+		if d.ID == id {
+			return d, nil
+		}
+	}
+	return Draft{}, fmt.Errorf("no draft %d", id)
+}
+
+// ClaimDraft moves a pending draft to the given state and reports whether
+// it did: two clicks on Approve claim it once, so it runs once.
+func (s *Store) ClaimDraft(id int64, state string) bool {
+	res, err := s.db.Exec(`UPDATE ops_drafts SET state=? WHERE id=? AND state='pending'`, state, id)
+	if err != nil {
+		return false
+	}
+	n, _ := res.RowsAffected()
+	return n > 0
+}
+
+// FinishDraft records how a claimed draft ended.
+func (s *Store) FinishDraft(id int64, state, result string) {
+	s.db.Exec(`UPDATE ops_drafts SET state=?, result=? WHERE id=?`, state, result, id)
+}
+
+// MarkCreated remembers a ticket the factory created.
+func (s *Store) MarkCreated(issue, job string) {
+	s.db.Exec(`INSERT OR IGNORE INTO ops_created(issue, job, created) VALUES(?,?,?)`, issue, job, time.Now().Format(time.RFC3339Nano))
+}
+
+// Created tells whether the factory created a ticket.
+func (s *Store) Created(issue string) bool {
+	var n int
+	s.db.QueryRow(`SELECT COUNT(*) FROM ops_created WHERE issue=?`, issue).Scan(&n)
+	return n > 0
 }

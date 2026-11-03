@@ -33,9 +33,13 @@ The pass context carries the time budget. Before handing out a cell, and before 
 
 SQLite tables next to `events`: `runs` (id, repo, setup, commit, kind, feature, technique, pass, wall_ms, cost_usd, dir), `passes` (state, summary JSON) and `ledger` (pass, repo, feature, technique, agent, commit, run, verdict, note).
 
-- `POST /api/passes` `{repo, runtime, usd, minutes, agents, checks, techniques}` starts a pass.
+- `POST /api/passes` `{repo, runtime, usd, minutes, agents, checks, techniques, level}` starts a pass. `level` (observe, propose, file or fix, default observe) is how far the operations agent may go for it.
 - `GET /api/passes/{id}` and `GET /api/passes/{id}/ledger` (rows with `run`, `run_dir`, `verdict`, `wall_ms`, `cost_usd`).
 - `POST /api/passes/{id}/stop`, `POST /api/passes/stop-all`.
+
+## Tracker work goes through Hermes
+
+Triage (dedup against existing issues), filing and milestone proposals don't have tracker code of their own. They ask the operations agent (see ENGINE.md §8.6): `ask_ops` for "is there a ticket about X?", and `tracker_create` with the `factory-patrol` tag for filing, with the caps and the level gate applied by the engine. A pass registers with the service, so its ledger rows, notes and Hermes's calls all share the `pass-<id>` event log. Triage and filing themselves are still to be built.
 
 ## Not built yet
 

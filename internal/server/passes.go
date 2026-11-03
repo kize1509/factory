@@ -62,6 +62,7 @@ func (s *Server) startPass(w http.ResponseWriter, r *http.Request) {
 		Agents  int      `json:"agents"`
 		Checks  int      `json:"checks"`
 		Tech    []string `json:"techniques"`
+		Level   string   `json:"level"` // observe (default), propose, file or fix: how far the operations agent may go
 	}
 	if err := json.NewDecoder(r.Body).Decode(&b); err != nil || b.Repo == "" {
 		http.Error(w, "need a repo", http.StatusBadRequest)
@@ -73,6 +74,13 @@ func (s *Server) startPass(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	b.Repo = repo
+	level := "observe"
+	if b.Level != "" {
+		if level = config.ValidLevel(b.Level); level == "" {
+			http.Error(w, "level is observe, propose, file or fix", http.StatusBadRequest)
+			return
+		}
+	}
 	if b.Runtime == "" {
 		b.Runtime = "claude-code"
 	}
@@ -86,13 +94,19 @@ func (s *Server) startPass(w http.ResponseWriter, r *http.Request) {
 		s.passes = map[string]*patrol.Pass{}
 	}
 	id := fmt.Sprintf("P%d", time.Now().UnixMilli())
-	p := &patrol.Pass{ID: id, Project: filepath.Base(b.Repo), Repo: b.Repo, Techniques: b.Tech, Store: s.Store,
+	p := &patrol.Pass{ID: id, Project: filepath.Base(b.Repo), Repo: b.Repo, Techniques: b.Tech, Store: s.Store, Level: level,
 		Budget: patrol.Budget{USD: b.USD, Time: time.Duration(b.Minutes * float64(time.Minute)), Agents: b.Agents, Checks: b.Checks}}
 	p.Agent = &patrol.RuntimeAgent{RT: rt, Model: s.Model, Cost: func(pass, agent string) float64 { return s.agentCost("pass-"+pass, agent) }}
 	s.passes[id] = p
 	s.mu.Unlock()
 	s.Bus.Place("pass-"+id, filepath.Join(config.Home(), "passes", id))
+	if s.Ops != nil {
+		s.Ops.Register("pass-"+id, b.Repo, "", "", level, true)
+	}
 	go func() {
+		if s.Ops != nil {
+			defer s.Ops.Close("pass-" + id)
+		}
 		if _, err := p.Run(context.Background()); err != nil {
 			s.Bus.Emit("pass-"+id, "", "pass.failed", map[string]any{"error": err.Error()})
 		}
