@@ -147,7 +147,7 @@ func run(t *testing.T, sp job.Spec, mk func(j *job.Job, bus *events.Bus) runtime
 }
 
 func fromOutcome(t *testing.T, repo string, mk func(j *job.Job, bus *events.Bus) runtime.Runtime, sp job.Spec) result {
-	o, err := Execute(context.Background(), sp, mk)
+	o, err := Execute(context.Background(), sp, RunOptions{Timeout: ScriptedTimeout}, mk)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -325,7 +325,7 @@ func TestRunFolderResultsAndReplay(t *testing.T) {
 	}
 	sp := spec("write done into app.txt")
 	sp.Repo = fixture.New(t, "hello")
-	_, res, err := Record(context.Background(), root, "run-1", sp, "hello", func(j *job.Job, bus *events.Bus) runtime.Runtime {
+	_, res, err := Record(context.Background(), root, "run-1", sp, "hello", RunOptions{Timeout: ScriptedTimeout}, func(j *job.Job, bus *events.Bus) runtime.Runtime {
 		return &scripted{job: j, bus: bus, script: healing, turns: map[string]int{}}
 	})
 	if err != nil {
@@ -380,5 +380,53 @@ func TestRunFolderResultsAndReplay(t *testing.T) {
 		if !strings.Contains(rep.Failure.Step+rep.Failure.Actual, want) {
 			t.Errorf("failure lacks %q: %+v", want, rep.Failure)
 		}
+	}
+}
+
+// A fixture that changed since the recording is named as the cause, first.
+func TestReplayNamesAChangedFixture(t *testing.T) {
+	root := t.TempDir()
+	sp := spec("write done into app.txt")
+	sp.Repo = fixture.New(t, "hello")
+	if _, _, err := Record(context.Background(), root, "run-1", sp, "hello", RunOptions{Timeout: ScriptedTimeout}, func(j *job.Job, bus *events.Bus) runtime.Runtime {
+		return &scripted{job: j, bus: bus, script: healing, turns: map[string]int{}}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// pretend the fixture was different when recorded
+	dir := RunDir(root, "run-1")
+	var meta Meta
+	b, _ := os.ReadFile(filepath.Join(dir, "meta.json"))
+	json.Unmarshal(b, &meta)
+	meta.Base = "0000000000000000000000000000000000000000"
+	writeJSON(filepath.Join(dir, "meta.json"), meta)
+	rep, err := Replay(context.Background(), root, "run-1", ReplayOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Pass || rep.Steps[0].Name != "repo commit matches the recording" || rep.Steps[0].Pass {
+		t.Fatalf("first step should be the failed commit check: %+v", rep.Steps)
+	}
+	if rep.Failure.Step != "repo commit matches the recording" || !strings.Contains(rep.Failure.Actual, "fixture hello changed") {
+		t.Errorf("failure: %+v", rep.Failure)
+	}
+	if len(rep.Steps) < 3 { // the cassette still ran
+		t.Errorf("cassette should still run: %+v", rep.Steps)
+	}
+}
+
+// A deadline that ends the job is reported as a timeout, not a stuck job.
+func TestRecordReportsATimeout(t *testing.T) {
+	sp := spec("write done into app.txt")
+	sp.Repo = fixture.New(t, "hello")
+	slow := map[string]func(step) string{"aristotle": func(s step) string { time.Sleep(2 * time.Second); return planner(s) }}
+	_, res, err := Record(context.Background(), t.TempDir(), "slow", sp, "hello", RunOptions{Timeout: 300 * time.Millisecond}, func(j *job.Job, bus *events.Bus) runtime.Runtime {
+		return &scripted{job: j, bus: bus, script: slow, turns: map[string]int{}}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Pass || res.Failure == nil || res.Failure.Step != "job finishes in time" || !strings.Contains(res.Failure.Actual, "timed out after 300ms") {
+		t.Fatalf("result: %+v", res)
 	}
 }

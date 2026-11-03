@@ -88,15 +88,27 @@ type Outcome struct {
 	Events   []events.Event
 	Final    Final
 	Duration time.Duration
+	TimedOut bool          // the deadline, not the job, ended the run
+	Timeout  time.Duration // the limit that was hit
 }
 
 // RunDir is where a run's evidence lives: <root>/.factory/runs/<id>.
 func RunDir(root, id string) string { return filepath.Join(root, ".factory", "runs", id) }
 
+// RunOptions is how a job is run. Timeout is how long it may take; zero means
+// no limit beyond ctx. A live run takes minutes, so the caller says how many.
+type RunOptions struct {
+	Timeout time.Duration
+}
+
+// ScriptedTimeout is the limit for scripted and replayed jobs, which finish
+// in about a second: a hang guard, not a budget.
+const ScriptedTimeout = 30 * time.Second
+
 // Execute puts sp (with sp.Repo set) through one whole job on the runtime mk
 // builds. A job that gets stuck waits for guidance, so the run is cancelled
 // as soon as it says so.
-func Execute(ctx context.Context, sp job.Spec, mk func(j *job.Job, bus *events.Bus) runtime.Runtime) (*Outcome, error) {
+func Execute(ctx context.Context, sp job.Spec, ro RunOptions, mk func(j *job.Job, bus *events.Bus) runtime.Runtime) (*Outcome, error) {
 	tmp, err := os.MkdirTemp("", "factory-harness-")
 	if err != nil {
 		return nil, err
@@ -110,7 +122,12 @@ func Execute(ctx context.Context, sp job.Spec, mk func(j *job.Job, bus *events.B
 	bus.Place(j.ID, j.Dir())
 	rt.Runtime = mk(j, bus)
 
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	var cancel context.CancelFunc
+	if ro.Timeout > 0 {
+		ctx, cancel = context.WithTimeout(ctx, ro.Timeout)
+	} else {
+		ctx, cancel = context.WithCancel(ctx)
+	}
 	defer cancel()
 	ch, unsub := bus.Subscribe(j.ID)
 	defer unsub()
@@ -125,6 +142,9 @@ func Execute(ctx context.Context, sp job.Spec, mk func(j *job.Job, bus *events.B
 	start := time.Now()
 	j.Run(ctx)
 	o := &Outcome{Job: j, Spec: started, Repo: sp.Repo, Duration: time.Since(start)}
+	if ro.Timeout > 0 && ctx.Err() == context.DeadlineExceeded {
+		o.TimedOut, o.Timeout = true, ro.Timeout
+	}
 	o.Events, _ = bus.Replay(j.ID)
 	for _, e := range o.Events {
 		o.Final.Types = append(o.Final.Types, e.Type)
@@ -169,8 +189,8 @@ func Replaying(root string, out **replay.Runtime) func(*job.Job, *events.Bus) ru
 // runtime inner builds, recording a cassette, and leaves a run folder
 // <root>/.factory/runs/<id>/ with events.jsonl, the cassette, the handoff
 // note, meta.json and result.json. The Result's pass is "the job finished".
-func Record(ctx context.Context, root, id string, sp job.Spec, fixtureName string, inner func(j *job.Job, bus *events.Bus) runtime.Runtime) (*Outcome, *Result, error) {
-	o, err := Execute(ctx, sp, Recording(inner))
+func Record(ctx context.Context, root, id string, sp job.Spec, fixtureName string, ro RunOptions, inner func(j *job.Job, bus *events.Bus) runtime.Runtime) (*Outcome, *Result, error) {
+	o, err := Execute(ctx, sp, ro, Recording(inner))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -192,10 +212,13 @@ func Record(ctx context.Context, root, id string, sp job.Spec, fixtureName strin
 	if err := writeJSON(filepath.Join(dir, "meta.json"), meta); err != nil {
 		return o, nil, err
 	}
-	pass := o.Job.State == "done"
-	r.Steps = []Step{{Name: "job reaches done", Pass: pass}}
+	pass := o.Job.State == "done" && !o.TimedOut
+	r.Steps = []Step{{Name: "job finishes in time", Pass: !o.TimedOut}, {Name: "job reaches done", Pass: o.Job.State == "done"}}
 	r.Pass = pass
-	if !pass {
+	if o.TimedOut {
+		// the cassette stops where the deadline hit, so it can't replay to the end
+		r.Failure = &Failure{Step: "job finishes in time", Expected: "finished within " + o.Timeout.String(), Actual: fmt.Sprintf("timed out after %s in state %s; the cassette is cut off there", o.Timeout, o.Job.State)}
+	} else if !pass {
 		actual := "state " + o.Job.State
 		if o.Job.Error != "" {
 			actual += ": " + o.Job.Error
@@ -270,8 +293,9 @@ func readResult(path string) (*Result, error) {
 // commit to check out in the clone: replay the same cassette on a repo at
 // any commit.
 type ReplayOptions struct {
-	Repo string
-	At   string
+	Repo    string
+	At      string
+	Timeout time.Duration // zero means ScriptedTimeout: replays are fast
 }
 
 // Replay plays the run's cassette against the current engine and a repo, and
@@ -300,8 +324,12 @@ func Replay(ctx context.Context, root, id string, o ReplayOptions) (*Result, err
 	sp := meta.Spec
 	sp.Repo = repo
 
+	timeout := o.Timeout
+	if timeout == 0 {
+		timeout = ScriptedTimeout
+	}
 	var rp *replay.Runtime
-	out, err := Execute(ctx, sp, Replaying(dir, &rp))
+	out, err := Execute(ctx, sp, RunOptions{Timeout: timeout}, Replaying(dir, &rp))
 	if err != nil {
 		return nil, err
 	}
@@ -314,6 +342,17 @@ func Replay(ctx context.Context, root, id string, o ReplayOptions) (*Result, err
 		if !ok {
 			fails = append(fails, Failure{Step: name, Expected: expected, Actual: actual})
 		}
+	}
+	// the repo first: a changed fixture shows up as drift or a tree mismatch
+	// below, and this says why. With --repo/--at the commit is chosen, so it
+	// is only reported.
+	if now := gitOut(repo, "rev-parse", "HEAD"); o.Repo == "" && meta.Base != "" {
+		check("repo commit matches the recording", now == meta.Base, meta.Base, now+" (the fixture "+meta.Fixture+" changed since this run was recorded)")
+	} else {
+		steps = append(steps, Step{Name: "repo commit (information: " + now + ", recorded " + meta.Base + ")", Pass: true})
+	}
+	if out.TimedOut {
+		check("job finishes in time", false, "finished within "+out.Timeout.String(), "timed out after "+out.Timeout.String())
 	}
 	if d := rp.Drift(); d != nil {
 		check(fmt.Sprintf("prompt matches %s turn %d", d.Agent, d.N), false, "the prompt as recorded", "the prompt differs (- recorded, + now):\n"+d.Diff)
