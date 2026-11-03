@@ -221,19 +221,20 @@ func (s *Server) continueJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Text string `json:"text"`
+		Text   string `json:"text"`
+		Action string `json:"action"` // one of the ways out the stuck job offers
 	}
 	json.NewDecoder(r.Body).Decode(&body)
-	s.guide(w, j, body.Text)
+	s.guide(w, j, body.Text, body.Action)
 }
 
-func (s *Server) guide(w http.ResponseWriter, j *job.Job, text string) {
-	start, err := j.Continue(text)
+func (s *Server) guide(w http.ResponseWriter, j *job.Job, text, action string) {
+	start, err := j.ContinueWith(text, action)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
-	s.Bus.Emit(j.ID, "", "human.guidance", map[string]any{"text": text})
+	s.Bus.Emit(j.ID, "", "human.guidance", map[string]any{"text": text, "action": action})
 	if start {
 		go j.Run(context.Background())
 	}
@@ -246,7 +247,8 @@ func (s *Server) jobContext(w http.ResponseWriter, r *http.Request) {
 	if j == nil {
 		return
 	}
-	writeJSON(w, map[string]any{"id": j.ID, "state": j.State, "phase": j.Phase, "error": j.Error, "brief": j.Brief()})
+	writeJSON(w, map[string]any{"id": j.ID, "state": j.State, "phase": j.Phase, "error": j.Error, "brief": j.Brief(),
+		"actions": j.Actions, "repeats": j.Repeats})
 }
 
 func (s *Server) projects(w http.ResponseWriter, _ *http.Request) {
@@ -355,7 +357,7 @@ func (s *Server) message(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if j.Resumable() { // a message to a stuck job is guidance to carry it on
-		s.guide(w, j, body.Text)
+		s.guide(w, j, body.Text, "")
 		return
 	}
 	if strings.TrimSpace(body.Text) != "" && j.Waiting() && j.Answer(body.Text) { // the job was waiting on you: this is the answer

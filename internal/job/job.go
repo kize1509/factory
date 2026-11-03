@@ -104,7 +104,9 @@ type Job struct {
 	asked     int // questions the reviewer asked this round
 	ctx       context.Context
 	Question  string          `json:"question,omitempty"`
-	Ask       string          `json:"ask,omitempty"` // a stuck job's agent, in its own words: what it needs from you
+	Ask       string          `json:"ask,omitempty"`     // a stuck job's agent, in its own words: what it needs from you
+	Actions   []Action        `json:"actions,omitempty"` // one-click ways out of a stuck job
+	Repeats   int             `json:"repeats,omitempty"` // resumes in a row that ended in the same failure
 	asks      map[string]*Ask // requests agents made with ask_human, by agent
 
 	rts           map[string]runtime.Runtime // every runtime, to pick one per role
@@ -117,13 +119,19 @@ type Job struct {
 	cwd           map[string]string // agent -> the worktree it works in
 	base          string            // the commit the job started from
 
-	alive       bool        // Run is going: a stuck job takes guidance at once
-	guide       chan string // your guidance for a stuck job
-	guidance    []string    // all of it so far
-	resume      *Resume     // set when the next run carries a stuck job on
-	lastFailure string      // the last failed check output
-	named       bool        // the planner gave the job its title
+	alive       bool       // Run is going: a stuck job takes guidance at once
+	guide       chan nudge // your guidance (or action) for a stuck job
+	guidance    []string   // all of it so far
+	resume      *Resume    // set when the next run carries a stuck job on
+	lastFailure string     // the last failed check output
+	named       bool       // the planner gave the job its title
+	prev        *Resume    // where the job was stuck before this resume, to spot a repeat
+	pushTo      string     // the branch on origin it ships to, when you picked a new one
+	force       bool       // you said to overwrite origin's branch on the next push
 }
+
+// nudge is what you give a stuck job: guidance, an action, or both.
+type nudge struct{ text, action string }
 
 const (
 	builder  = "archimedes"
@@ -231,7 +239,7 @@ func New(spec Spec, bus *events.Bus, rt runtime.Runtime) *Job {
 		spec.MaxReviews = 2
 	}
 	return &Job{Spec: spec, State: "starting", Island: -1, Started: time.Now(), bus: bus, rt: rt,
-		agents: map[string]runtime.Agent{}, handoffs: map[string]*handoff.Note{}, answers: make(chan string, 1), guide: make(chan string, 1),
+		agents: map[string]runtime.Agent{}, handoffs: map[string]*handoff.Note{}, answers: make(chan string, 1), guide: make(chan nudge, 1),
 		lead: builder, inExperiment: map[string]bool{}, labels: map[string]int{}, grades: map[string]int{}, cwd: map[string]string{}}
 }
 
@@ -395,13 +403,16 @@ func (j *Job) Run(parent context.Context) {
 		j.mu.Lock()
 		phase := j.State
 		j.mu.Unlock()
-		j.stuck(phase, err, work, j.plea(ctx, err))
+		repeats := j.repeats(phase, err)
+		j.stuck(phase, err, work, j.plea(ctx, err, phase, repeats), repeats)
 		select {
 		case g := <-j.guide:
 			r := j.loadResume()
 			j.mu.Lock()
-			j.guidance = append(j.guidance, g)
-			r.Guidance = j.guidance
+			if g.text != "" {
+				j.guidance = append(j.guidance, g.text)
+			}
+			r.Guidance, r.Action = j.guidance, g.action
 			j.resume, j.Error, j.Phase, j.Ask = r, "", "", ""
 			j.mu.Unlock()
 		case <-ctx.Done():
@@ -443,9 +454,21 @@ func (j *Job) run(ctx context.Context) (*workspace.Worktree, error) {
 	}
 	j.Worktree, j.Branch = wt.Path, wt.Branch
 	r := j.takeResume()
-	if j.base == "" && r != nil {
-		j.base = r.Base
+	if r != nil {
+		j.mu.Lock()
+		j.prev = r
+		j.mu.Unlock()
+		if j.base == "" {
+			j.base = r.Base
+		}
+		if r.Ship != "" {
+			j.Ship = r.Ship
+		}
+		if r.PushTo != "" {
+			j.pushTo = r.PushTo
+		}
 	}
+	wt.Remote = j.pushTo
 	if j.base == "" {
 		j.base, _ = wt.Head()
 	}
@@ -453,13 +476,16 @@ func (j *Job) run(ctx context.Context) (*workspace.Worktree, error) {
 	scratch := filepath.Join(j.Dir(), "scratch")
 	os.MkdirAll(scratch, 0o755)
 
+	if r != nil && r.Action != "" { // the way out you picked
+		return j.act(ctx, wt, r)
+	}
+	if r != nil && shipPhase(r.Phase) { // the engine's own step: an agent with git carries your guidance out
+		return j.repair(ctx, wt, r)
+	}
 	if r != nil { // carry a stuck job on with your guidance
-		work, a, commitOnly, err := j.carryOn(ctx, wt, r)
+		work, a, err := j.carryOn(ctx, wt, r)
 		if err != nil {
 			return orWT(work, wt), err
-		}
-		if commitOnly {
-			return work, j.commit(wt, work, a)
 		}
 		if err := j.checkLoop(ctx, work, a, j.lead, false); err != nil {
 			return work, err
@@ -642,6 +668,11 @@ func (j *Job) commit(wt, work *workspace.Worktree, a runtime.Agent) error {
 	if err != nil {
 		return err
 	}
+	return j.shipCommitted(wt, sha)
+}
+
+// shipCommitted records the job's commit, ships it and marks the job done.
+func (j *Job) shipCommitted(wt *workspace.Worktree, sha string) error {
 	if len(sha) > 7 {
 		sha = sha[:7]
 	}
@@ -662,10 +693,24 @@ func (j *Job) ship(wt *workspace.Worktree) error {
 		return nil
 	}
 	j.set("shipping")
-	if err := wt.Push(); err != nil {
+	push := wt.Push
+	if j.force {
+		push = wt.ForcePush
+	}
+	if err := push(); err != nil {
 		return fmt.Errorf("push: %w", err)
 	}
-	j.emit("", "job.pushed", map[string]any{"branch": wt.Branch})
+	if j.force {
+		j.force = false
+		j.emit("", "ship.force_pushed", map[string]any{"branch": wt.RemoteBranch()})
+	}
+	if head, _ := wt.Head(); len(head) >= 7 && !strings.HasPrefix(head, j.Commit) {
+		j.mu.Lock()
+		j.Commit = head[:7] // rebased onto origin's copy of the branch
+		j.mu.Unlock()
+		j.emit("", "ship.rebased", map[string]any{"sha": head[:7], "branch": wt.Branch})
+	}
+	j.emit("", "job.pushed", map[string]any{"branch": wt.RemoteBranch()})
 	if mode != "pr" {
 		return nil
 	}

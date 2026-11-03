@@ -45,6 +45,13 @@
   #m-guide .why.plea { color:var(--fg); font-size:14px } #m-guide .why.plea > b { color:var(--fail) }
   #m-guide .why details { margin-top:8px; color:var(--soft) } #m-guide .why details summary { cursor:pointer; font:11px Silkscreen, monospace }
   #m-guide .why .md .code pre, #m-guide .why .md .code pre code { white-space:pre-wrap; overflow-wrap:anywhere }
+  #m-guide .mb { grid-auto-rows:max-content } /* rows that scroll on their own mustn't shrink to nothing */
+  #m-guide .repeat { margin:0; padding:8px 10px; border:2px solid var(--warn); border-radius:4px; font-size:13px; color:var(--fg); background:color-mix(in srgb, var(--warn) 14%, var(--card)) }
+  #m-guide .acts { display:grid; gap:6px } #m-guide .acts > b { font:11px Silkscreen, monospace; color:var(--soft); font-weight:400 }
+  #m-guide .acts .act { display:grid; grid-template-columns:auto 1fr; gap:10px; align-items:center }
+  #m-guide .acts .act span { color:var(--soft); font-size:12.5px }
+  #m-guide .acts .act button.danger { border-color:var(--fail); color:var(--fail) }
+  @media (max-width: 560px) { #m-guide .acts .act { grid-template-columns:1fr; gap:2px } }
   .modal.wide .box { width:min(1240px, 100%); height:min(90vh, 1000px); max-height:none }
   .modal .mh { display:flex; align-items:center; gap:10px; padding:12px 16px; border-bottom:2px solid var(--line) }
   .modal .mh b { font:13px Silkscreen, monospace; color:var(--accent) }
@@ -354,9 +361,11 @@
   <form id="gdf" style="display:contents">
     <div class="mb">
       <div class="why" id="gd-why"></div>
+      <p class="repeat" id="gd-repeat" hidden></p>
+      <div class="acts" id="gd-acts" hidden></div>
       <details id="gd-more"><summary>Where it stopped: everything the agent knows</summary><pre class="brief" id="gd-brief">Loading…</pre></details>
       <label><b id="gd-label">Your guidance</b> <span id="gd-help">what to do next, what it got wrong, or where to look. The same agent carries on from where it stopped.</span>
-        <textarea name="text" rows="5" required placeholder="e.g. the test fails because the parser trims spaces; keep them. Look at parse.go line 40."></textarea></label>
+        <textarea name="text" rows="5" placeholder="e.g. the test fails because the parser trims spaces; keep them. Look at parse.go line 40."></textarea></label>
     </div>
     <div class="mf"><button type="submit" class="primary" id="gd-go">Carry on</button><span class="err" id="gderr"></span><span style="flex:1"></span><button type="button" data-close>Later</button></div>
   </form>
@@ -1485,18 +1494,13 @@ for (const j of JOBS) if (j !== cur) { const keep = procs; procs = j.st.procs; s
   const po = img(A.assets['portrait/homer'].states.idle.file), fr = img(A.assets['frame/bronze-32'].states.idle.file);
   const paint = () => { c.clearRect(0, 0, 104, 104); c.drawImage(po, 6, 6, 92, 92); c.drawImage(fr, 0, 0, 104, 104); };
   po.onload = fr.onload = paint; if (po.complete && fr.complete) paint(); }
-if (!LIVE_APP) {
-  for (const j of JOBS) if (j !== cur) narrate(NARR[j.st.setup], j);
-  resize(); applySetup(cur.st.setup); narrate(NARR[cur.st.setup]);
-} else { resize(); }
-requestAnimationFrame(frame);
 
 // ---------- live mode: the map follows a running engine ----------
 // Served by `factory serve`, the page reads real jobs and their events.
 // Served any other way, it keeps the demo above.
 const CITIES = ['Athens', 'Corinth', 'Miletus', 'Thebes', 'Argos', 'Rhodes', 'Delphi', 'Sparta', 'Ephesus', 'Syracuse', 'Knossos', 'Megara'];
-const LIVE_LABEL = { starting:'Starting', planning:'Plan', symposium:'Symposium', grading:'Grading experiments', building:'Build', checking:'Checks running', handoff:'Handoff', reviewing:'Review', committing:'Ship', shipping:'Ship', done:'Done', failed:'Failed', waiting:'Needs you', interrupted:'Interrupted', stuck:'Needs your guidance', cancelled:'Stopped' };
-const LIVE_AT = { starting:'gates', planning:'academy', symposium:'symposium', grading:'symposium', building:'workshop', checking:'oracle', handoff:'workshop', reviewing:'areopagus', committing:'harbour', shipping:'harbour', failed:'agora', waiting:'agora', interrupted:'agora', stuck:'agora' };
+const LIVE_LABEL = { starting:'Starting', planning:'Plan', symposium:'Symposium', grading:'Grading experiments', building:'Build', checking:'Checks running', handoff:'Handoff', reviewing:'Review', committing:'Ship', shipping:'Ship', repairing:'Repairing the ship step', done:'Done', failed:'Failed', waiting:'Needs you', interrupted:'Interrupted', stuck:'Needs your guidance', cancelled:'Stopped' };
+const LIVE_AT = { starting:'gates', planning:'academy', symposium:'symposium', grading:'symposium', building:'workshop', checking:'oracle', handoff:'workshop', reviewing:'areopagus', committing:'harbour', shipping:'harbour', repairing:'harbour', failed:'agora', waiting:'agora', interrupted:'agora', stuck:'agora' };
 const pageStart = Date.now();
 const BUILDER = 'archimedes', REVIEWER = 'socrates', PLANNER = 'aristotle', GRADER = 'zeno';
 
@@ -1649,12 +1653,15 @@ function onEvent(j, e) {
     case 'job.cancelled': L.state = 'cancelled'; L.stuck = null; clearAlarm(j);
       say(`You stopped ${j.id}. Its agents went home; the work so far stays on ${code(d.branch || 'its branch')}.`); refresh(j, true); return;
     case 'job.done': L.state = 'done'; say(`${j.id} is done. ${j.city} is quiet again.`, 'ok'); refresh(j, true); return;
-    case 'job.stuck': L.state = 'stuck'; L.stuck = { error:d.error, phase:d.phase, ask:d.ask }; L.msg = 'Stuck: click me to guide me on';
+    case 'job.stuck': L.state = 'stuck'; L.stuck = { error:d.error, phase:d.phase, ask:d.ask, actions:d.actions || [], repeats:d.repeats || 0 }; L.msg = 'Stuck: click me to guide me on';
       say(d.ask ? `${j.id} is stuck at ${d.phase || 'work'}. ${who[e.agent]?.Name || 'Archimedes'}: ${Md.oneLine(d.ask, 300)}` : `${j.id} is stuck at ${d.phase || 'work'}: ${Md.oneLine(d.error, 300)}. It waits for your guidance, then carries on.`, 'fail');
       if (!old) alarm(j, 'stuck', d.ask || d.error); refresh(j, true); return;
-    case 'job.resumed': L.stuck = null; L.msg = 'Carrying on with your guidance'; clearAlarm(j);
-      say(`${who[d.lead]?.Name || 'Archimedes'} carries ${j.id} on with your guidance: "${d.guidance}"`); refresh(j, true); return;
-    case 'human.guidance': say(`You guided ${j.id}: "${d.text}"`); break;
+    case 'job.resumed': L.stuck = null; clearAlarm(j);
+      if (d.action) { L.msg = 'Taking the way out you picked'; say(`The engine takes ${j.id} on: ${ACTION_SAID[d.action] || d.action}.`); }
+      else if (d.repair) { L.msg = 'Fixing the ship step with your guidance'; say(`${who[d.lead]?.Name || 'Archimedes'} fixes ${j.id}'s ${STEP_NAME[d.phase] || d.phase} with git, as you said: "${d.guidance}"`); }
+      else { L.msg = 'Carrying on with your guidance'; say(`${who[d.lead]?.Name || 'Archimedes'} carries ${j.id} on with your guidance: "${d.guidance}"`); }
+      refresh(j, true); return;
+    case 'human.guidance': if (d.text) say(`You guided ${j.id}: "${d.text}"`); break;
     case 'job.named': j.title = d.title || j.title; if (d.project) PROJECTS[j.repo] = d.project;
       say(`Aristotle names the job: ${d.title}${d.project ? ` (${d.project})` : ''}.`); hud(); break;
     case 'job.failed': L.state = 'failed'; L.msg = 'Job failed: ' + d.error; say(`${j.id} failed: ${d.error}`, 'fail'); refresh(j, true); return;
@@ -1698,7 +1705,7 @@ function addLiveJob(info) {
   }
   if (info.island === undefined) setTimeout(syncJobs, 150); // an event told of it first: the engine's list has its island
   j.live = { state:info.state || 'starting', msg:'', oracle:null };
-  if (info.state === 'stuck') j.live.stuck = { error:info.error, phase:info.phase, ask:info.ask };
+  if (info.state === 'stuck') j.live.stuck = { error:info.error, phase:info.phase, ask:info.ask, actions:info.actions || [], repeats:info.repeats || 0 };
   if (info.state === 'waiting') j.live.question = info.question;
   j.chron = [];
   refresh(j, true);
@@ -1783,11 +1790,30 @@ function chime() {
 // ask once, on your first click, so the browser lets us notify and chime
 addEventListener('pointerdown', () => { try { audio ||= new AudioContext(); if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission(); } catch {} }, { once:true });
 let guideJob = null;
+const STEP_NAME = { starting:'the start', planning:'planning', symposium:'the Symposium', grading:'grading', building:'building', checking:'the checks', handoff:'the handoff', reviewing:'review', committing:'the commit', shipping:'shipping' };
+const ACTION_SAID = { retry:'it tries the step again', skip_pr:'it pushes without opening a PR', new_branch:'it pushes to a new branch', force_push:"it overwrites origin's branch",
+  commit_only:'it keeps the commit and ships nothing', commit_anyway:'it commits the work as it is' };
+// the ways out a stuck job offers, as buttons; your text, if any, goes along
+function guideActions(j) {
+  const L = j.live || {}, acts = L.state === 'stuck' ? L.stuck?.actions || [] : [], box = document.getElementById('gd-acts'), rep = document.getElementById('gd-repeat');
+  const n = L.state === 'stuck' ? L.stuck?.repeats || 0 : 0;
+  rep.hidden = !n;
+  rep.textContent = n ? `Same failure ${n + 1} times in a row. What you tried last didn't change anything, so try something different${acts.length ? ': one of the ways out below, or other guidance.' : '.'}` : '';
+  box.hidden = !acts.length;
+  const h = document.createElement('b'); h.textContent = 'Or pick a way out';
+  box.replaceChildren(h, ...acts.map(a => {
+    const row = document.createElement('div'), b = document.createElement('button'), hint = document.createElement('span');
+    row.className = 'act'; b.type = 'button'; b.textContent = a.label; hint.textContent = a.hint;
+    if (a.confirm) b.classList.add('danger');
+    b.onclick = () => { if (a.confirm && !confirm(a.confirm)) return; sendGuide(j, document.getElementById('gdf').text.value.trim(), a.id); };
+    row.append(b, hint); return row;
+  }));
+}
 async function openGuide(j) {
   guideJob = j; const L = j.live || {}, ask = L.state === 'waiting', f = document.getElementById('gdf');
   document.getElementById('m-guide-t').textContent = ask ? 'Answer the question' : 'Guide it on';
   document.getElementById('m-guide-s').textContent = `${j.id} · ${j.title}`;
-  const STEP = { starting:'the start', planning:'planning', symposium:'the Symposium', grading:'grading', building:'building', checking:'the checks', handoff:'the handoff', reviewing:'review', committing:'the commit', shipping:'shipping' };
+  const STEP = STEP_NAME;
   const why = document.getElementById('gd-why');
   why.classList.toggle('plea', ask || !!L.stuck?.ask);
   if (ask) why.replaceChildren(Md.render(L.question || ''));
@@ -1800,24 +1826,33 @@ async function openGuide(j) {
     } else why.replaceChildren(h, ...(L.stuck?.error ? [Md.code(L.stuck.error)] : []));
   }
   document.getElementById('gd-label').textContent = ask ? 'Your answer' : 'Your guidance';
-  document.getElementById('gd-help').textContent = ask ? 'the agent gets it as its next message and carries on.' : 'what to do next, what it got wrong, or where to look. The same agent carries on from where it stopped.';
+  const shipStep = !ask && (L.stuck?.phase === 'committing' || L.stuck?.phase === 'shipping');
+  document.getElementById('gd-help').textContent = ask ? 'the agent gets it as its next message and carries on.' : shipStep ?
+    'what to do about the commit or push. An agent with git carries it out in the job\'s worktree (no force-push unless you say so), then the engine ships the branch.' :
+    'what to do next, what it got wrong, or where to look. The same agent carries on from where it stopped.';
   f.text.placeholder = ask ? 'e.g. the key is in 1Password under Weather; read it from OPENWEATHER_API_KEY' : 'e.g. the test fails because the parser trims spaces; keep them. Look at parse.go line 40.';
   document.getElementById('gd-go').textContent = ask ? 'Send answer' : 'Carry on';
   document.getElementById('gd-more').style.display = ask ? 'none' : '';
+  guideActions(j);
   document.getElementById('gderr').textContent = ''; f.text.value = '';
   openModal('m-guide'); setTimeout(() => f.text.focus(), 50);
   const pre = document.getElementById('gd-brief'); pre.textContent = 'Loading…';
   if (!ask) try { const r = await fetch(`/api/jobs/${encodeURIComponent(j.id)}/context`, { cache:'no-store' }); const c = await r.json(); pre.textContent = c.brief || 'Nothing was written down for this job.'; } catch { pre.textContent = 'The engine is not answering.'; }
 }
-document.getElementById('gdf').onsubmit = async e => {
-  e.preventDefault(); const j = guideJob, text = e.target.text.value.trim(), err = document.getElementById('gderr'); if (!j || !text) return;
+document.getElementById('gdf').onsubmit = e => {
+  e.preventDefault(); const text = e.target.text.value.trim();
+  if (!text) { document.getElementById('gderr').textContent = guideJob?.live?.stuck?.actions?.length ? 'Write some guidance, or pick a way out.' : 'Write some guidance first.'; return; }
+  sendGuide(guideJob, text, '');
+};
+async function sendGuide(j, text, action) {
+  const err = document.getElementById('gderr'); if (!j || (!text && !action)) return;
   const ask = j.live?.state === 'waiting';
   err.textContent = 'Sending…';
   const r = await fetch(ask ? `/api/agents/${encodeURIComponent(j.id)}/${j.live?.asker || j.live?.lead || BUILDER}/message` : `/api/jobs/${encodeURIComponent(j.id)}/continue`,
-    { method:'POST', headers:{ 'content-type':'application/json' }, body:JSON.stringify({ text }) }).catch(x => ({ ok:false, text:async () => x.message }));
+    { method:'POST', headers:{ 'content-type':'application/json' }, body:JSON.stringify(ask ? { text } : { text, action }) }).catch(x => ({ ok:false, text:async () => x.message }));
   if (!r.ok) { err.textContent = await r.text(); return; }
   closeModal('m-guide'); clearAlarm(j);
-};
+}
 
 // ---------- modal windows ----------
 function openModal(id) { document.getElementById(id).classList.add('open'); }
@@ -1933,6 +1968,14 @@ document.getElementById('ntf').onsubmit = async ev => {
   closeModal('m-task');
   enterCity(addLiveJob({ id, title:body.notes ? body.notes.split('\n')[0] : body.issue, repo:body.repo, state:'starting' }));
 };
+// first paint, once every const above is declared: the map's countries and
+// islands read COUNTRY_INK, PROJECTS and projectName, which come after the
+// scene code
+if (!LIVE_APP) {
+  for (const j of JOBS) if (j !== cur) narrate(NARR[j.st.setup], j);
+  resize(); applySetup(cur.st.setup); narrate(NARR[cur.st.setup]);
+} else { resize(); }
+requestAnimationFrame(frame);
 goLive();
 </script>
 </body>
