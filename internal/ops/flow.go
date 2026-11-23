@@ -368,22 +368,29 @@ func (s *Service) Tool(scopeID, agent, tool string, args []byte) (string, error)
 		}
 		return "Noted. The operations agent keeps it with this job and its tickets.", nil
 	}
-	if agent != Hermes {
+	sc := s.scope(scopeID)
+	board := sc != nil && sc.Board != "" && agent == sc.Board
+	if agent != Hermes && !(board && strings.HasPrefix(tool, "tracker_") || board && tool == "knowledge_search") {
 		return "", fmt.Errorf("only the operations agent has the tool %q; use ask_ops to ask it", tool)
 	}
-	sc := s.scope(scopeID)
 	if sc == nil {
 		return "", fmt.Errorf("no job or pass %s", scopeID)
+	}
+	who := func() string {
+		if board {
+			return agent
+		}
+		return requester(sc)
 	}
 	switch tool {
 	case "tracker_search":
 		var b struct{ Query string }
 		json.Unmarshal(args, &b)
-		return s.Search(sc, requester(sc), b.Query)
+		return s.Search(sc, who(), b.Query)
 	case "tracker_read":
 		var b struct{ ID string }
 		json.Unmarshal(args, &b)
-		return s.Read(sc, requester(sc), b.ID)
+		return s.Read(sc, who(), b.ID)
 	case "knowledge_search":
 		var b struct{ Query string }
 		json.Unmarshal(args, &b)
@@ -404,7 +411,7 @@ func (s *Service) Tool(scopeID, agent, tool string, args []byte) (string, error)
 				f[k] = v
 			}
 		}
-		return s.Write(sc, requester(sc), Action{Kind: "create", Project: b.Project, Summary: b.Summary, Description: b.Description, Fields: f, Tags: b.Tags, Links: b.Links})
+		return s.Write(sc, who(), Action{Kind: "create", Project: b.Project, Summary: b.Summary, Description: b.Description, Fields: f, Tags: b.Tags, Links: b.Links})
 	case "tracker_update":
 		var b struct {
 			ID     string            `json:"id"`
@@ -413,15 +420,15 @@ func (s *Service) Tool(scopeID, agent, tool string, args []byte) (string, error)
 		if err := json.Unmarshal(args, &b); err != nil {
 			return "", err
 		}
-		return s.Write(sc, requester(sc), Action{Kind: "update", Issue: b.ID, Fields: b.Fields})
+		return s.Write(sc, who(), Action{Kind: "update", Issue: b.ID, Fields: b.Fields})
 	case "tracker_move":
 		var b struct{ ID, State string }
 		json.Unmarshal(args, &b)
-		return s.Write(sc, requester(sc), Action{Kind: "move", Issue: b.ID, Fields: map[string]string{"State": b.State}})
+		return s.Write(sc, who(), Action{Kind: "move", Issue: b.ID, Fields: map[string]string{"State": b.State}})
 	case "tracker_comment":
 		var b struct{ ID, Text string }
 		json.Unmarshal(args, &b)
-		return s.Write(sc, requester(sc), Action{Kind: "comment", Issue: b.ID, Text: b.Text})
+		return s.Write(sc, who(), Action{Kind: "comment", Issue: b.ID, Text: b.Text})
 	case "tracker_link":
 		var b struct{ ID, Type, Target, Tag string }
 		json.Unmarshal(args, &b)
@@ -429,11 +436,11 @@ func (s *Service) Tool(scopeID, agent, tool string, args []byte) (string, error)
 		if b.Tag != "" {
 			a.Tags = []string{b.Tag}
 		}
-		return s.Write(sc, requester(sc), a)
+		return s.Write(sc, who(), a)
 	case "tracker_attach":
 		var b struct{ ID, Path string }
 		json.Unmarshal(args, &b)
-		return s.Write(sc, requester(sc), Action{Kind: "attach", Issue: b.ID, Path: b.Path})
+		return s.Write(sc, who(), Action{Kind: "attach", Issue: b.ID, Path: b.Path})
 	case "answer":
 		var b struct {
 			Text    string   `json:"text"`

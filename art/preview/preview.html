@@ -68,6 +68,36 @@
   .modal details summary { cursor:pointer; font:11px Silkscreen, monospace; color:var(--soft) }
   .modal details[open] summary { margin-bottom:10px }
   .modal .row2 { display:grid; grid-template-columns:1fr 1fr; gap:10px }
+  /* the Board: Pericles, the product agent */
+  #m-board .mb { grid-template-columns:230px 1fr; align-items:start }
+  #m-board .boards { display:grid; gap:6px; position:sticky; top:0 }
+  #m-board .boards > small { color:var(--soft); font-size:12px }
+  #m-board .boards button { text-align:left; display:grid; gap:2px; font:13px Inter, sans-serif; border-width:2px; border-color:var(--line); padding:8px 10px }
+  #m-board .boards button.on { border-color:var(--accent); background:color-mix(in srgb, var(--accent) 8%, var(--card)); color:var(--fg) }
+  #m-board .boards button small { color:var(--soft); font-size:11.5px }
+  #m-board .pane { display:grid; gap:14px; min-width:0 }
+  #m-board .intro { margin:0; font-size:13.5px; line-height:1.5 }
+  #m-board section { border:2px solid var(--line); border-radius:6px; padding:12px 14px; display:grid; gap:10px }
+  #m-board section > h3 { margin:0; font:12px Silkscreen, monospace; color:var(--accent); font-weight:400 }
+  #m-board section > p { margin:0; color:var(--soft); font-size:12.5px; line-height:1.45 }
+  #m-board .row3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px }
+  #m-board .check { display:flex; flex-direction:row; gap:8px; align-items:flex-start }
+  #m-board .check input { width:auto; flex:none; margin:3px 0 0; padding:0 }
+  #m-board .acts { display:flex; gap:10px; align-items:center; flex-wrap:wrap }
+  #m-board .acts .msg { font-size:12.5px; color:var(--soft) } #m-board .acts .msg.bad { color:var(--fail) }
+  #m-board .run { border:1px solid var(--line); border-radius:6px; padding:10px 12px; display:grid; gap:6px; font-size:13px }
+  #m-board .run .top { display:flex; gap:8px; align-items:center; flex-wrap:wrap }
+  #m-board .run .top small { color:var(--soft) }
+  #m-board .run .top button { margin-left:auto }
+  #m-board .run ul { margin:0; padding-left:18px; display:grid; gap:3px }
+  #m-board .run .lbl { font:11px Silkscreen, monospace; color:var(--soft) }
+  #m-board .run .err { color:var(--fail) }
+  #m-board .pill { font:11px Silkscreen, monospace; padding:2px 6px; border-radius:3px; border:1px solid currentColor }
+  #m-board .pill.running { color:var(--think) } #m-board .pill.done { color:var(--ok) } #m-board .pill.failed { color:var(--fail) } #m-board .pill.stopped { color:var(--soft) }
+  #m-board .note { font-size:12px; color:var(--soft) }
+  #m-board .empty { color:var(--soft); font-size:13px }
+  #board.working::after { content:' · working'; color:var(--think) }
+  @media (max-width: 760px) { #m-board .mb { grid-template-columns:1fr } #m-board .boards { position:static } #m-board .row3 { grid-template-columns:1fr } }
   .modal .err { color:var(--fail); font-size:13px }
   @media (max-width: 560px) { .modal .row2 { grid-template-columns:1fr } }
   .fsb { border:2px solid var(--line); border-radius:4px; overflow:hidden; display:grid }
@@ -292,6 +322,7 @@
   <h1>Factory art</h1>
   <button id="admin" class="primary" title="Admin: jobs, settings, models, roles, metrics (A)">⚙ Admin</button>
   <button id="newtask" class="primary" title="Start a job from an issue ID (N)" style="display:none">＋ New task</button>
+  <button id="board" class="primary" title="The board: Pericles, the product agent, goes over a project's tickets and starts jobs on the ready ones (B)" style="display:none">🏛 Board</button>
   <button id="tab-scene" class="on">Scene</button>
   <button id="tab-sheet">Catalogue</button>
   <span style="flex:1"></span>
@@ -356,6 +387,13 @@
     <div class="mf"><button type="submit" class="primary">Start the job</button><span class="err" id="nterr"></span><span style="flex:1"></span><button type="button" data-close>Cancel</button></div>
   </form>
 </div></div>
+<div class="modal wide" id="m-board" role="dialog" aria-modal="true" aria-labelledby="m-board-t"><div class="box">
+  <div class="mh"><b id="m-board-t">🏛 Board</b><span>Pericles, the product agent, runs a project's tickets</span><button class="x" data-close>Close</button></div>
+  <div class="mb">
+    <div class="boards" id="bd-list"></div>
+    <div class="pane" id="bd-pane"></div>
+  </div>
+</div></div>
 <div class="modal" id="m-guide" role="dialog" aria-modal="true" aria-labelledby="m-guide-t"><div class="box">
   <div class="mh"><b id="m-guide-t">Guide it on</b><span id="m-guide-s"></span><button class="x" data-close>Close</button></div>
   <form id="gdf" style="display:contents">
@@ -384,7 +422,7 @@ const stage = document.getElementById('stage'), view = document.getElementById('
 const big = document.createElement('canvas'), bctx = big.getContext('2d'), org = { x:0, y:0 };
 const place = Object.fromEntries(A.layout.map(p => [p.id, p]));
 const who = Object.fromEntries(A.philosophers.map(p => [p.ID, p]));
-const RUNTIME = { scheduler:'pi · claude-opus-5-5', planner:'pi · claude-opus-5-5', researcher:'pi · claude-sonnet-5-5', builder:'pi · claude-sonnet-5-5',
+const RUNTIME = { product:'pi · claude-opus-5-5', planner:'pi · claude-opus-5-5', researcher:'pi · claude-sonnet-5-5', builder:'pi · claude-sonnet-5-5',
                   reviewer:'codex · gpt-6.1-sol', humanizer:'claude · claude-sonnet-5-5', finalizer:'pi · claude-haiku-5-5', dj:'plays sets at the Theatre', narrator:'tells the story' };
 let dusk = false, setup = 'idle', selected = null, playing = null, last = performance.now(), concert = null, ufo = null;
 
@@ -400,11 +438,11 @@ function sprite(c, id, st, x, y, k = 1, fps = 6, t = 0) {
 // ---------- what each moment of a job looks like ----------
 const SETUPS = {
   idle:      { desc:'No job is running. The city is quiet and the ship waits at the pier.', label:'No jobs', bldg:{}, agents:[] },
-  intake:    { desc:'You started a task. The ticket comes in through the Gates and Solon reads it.', label:'Ticket arrives', bldg:{gates:'active'}, agents:[['solon','gates','thinking','Reading ABC-123']] },
+  intake:    { desc:'A job starts. Pericles brings the ticket in from the board through the Gates.', label:'Ticket arrives', bldg:{gates:'active'}, agents:[['pericles','gates','thinking','Bringing in ABC-123']] },
   research:  { desc:'Researchers read the ticket, docs, related work and code at the Library, and find ways to check the result.', label:'Research', bldg:{library:'active', council:'active'}, agents:[
-               ['herodotus','library','tool','Reading auth/session.go'], ['thales','library','thinking','Found npm test and e2e'], ['solon','council','waiting','Waiting for research']] },
-  plan:      { desc:'The planner writes the plan at the Academy, then walks over to Solon to agree on the team.', label:'Plan', bldg:{academy:'active', council:'active'}, agents:[
-               ['aristotle','academy','thinking','Drawing the plan'], ['solon','council','tool','2 builders, 1 executor']], say:[['aristotle','solon',['The plan has two subtasks: retry wrapper, then config.','Then two builders and one executor.','Retry first. Config is a small, spelled out step.']]] },
+               ['herodotus','library','tool','Reading auth/session.go'], ['thales','library','thinking','Found npm test and e2e'], ['pericles','council','waiting','Back at the board']] },
+  plan:      { desc:'Aristotle writes the plan at the Academy. Pericles asks the owner about a detail the ticket left open.', label:'Plan', bldg:{academy:'active', council:'active'}, agents:[
+               ['aristotle','academy','thinking','Drawing the plan'], ['pericles','council','tool','Asking the owner on ABC-123']], say:[['aristotle','pericles',['The plan has two steps: retry wrapper, then config.','Is the 45s limit firm?','The owner says yes, 45s on slow 3G.']]] },
   symposium: { desc:'Several approaches are tried at once on separate branches, one builder each. The best score wins.', label:'Symposium', bldg:{symposium:'active'}, agents:[
                ['archimedes','symposium','tool','Exp 1: cache layer'], ['euclid','symposium','tool','Exp 2: fix the query'],
                ['hero','symposium','tool','Exp 3: batch writes'], ['plato','academy','waiting','Waiting for scores']] },
@@ -457,7 +495,7 @@ setInterval(() => {
 
 // ---------- handoffs: the only thing that passes from one phase to the next ----------
 const HANDOFFS = {
-  research:  { from:'solon (scheduler)', to:'researchers', did:'Read ABC-123 and its two linked tickets.', decisions:[], findings:['Success: login works on a slow 3G profile within 45s'], files:[], open_questions:[], next:'Find where the 30s timeout lives and which checks exist.' },
+  research:  { from:'pericles (product)', to:'researchers', did:'Read ABC-123 and its two linked tickets.', decisions:[], findings:['Success: login works on a slow 3G profile within 45s'], files:[], open_questions:[], next:'Find where the 30s timeout lives and which checks exist.' },
   plan:      { from:'herodotus (researcher)', to:'planner', did:'Traced the timeout and listed the checks.', decisions:[], findings:['Timeout is inline in src/auth/session.go:42', 'A retry helper exists in net/retry.go', 'Checks: npm test, npm run e2e'], files:['src/auth/session.go', 'net/retry.go'], open_questions:[], next:'Choose between a longer timeout and retry with backoff.' },
   symposium: { missing:'aristotle', from:'aristotle (planner)', to:'builders', did:'Found three workable approaches.', decisions:['Try all three as experiments, one builder each'], findings:['All three touch session.go only'], files:['src/auth/session.go'], open_questions:[], next:'Archimedes: cache layer. Euclid: fix the query. Hero: batch writes.' },
   build:     { from:'plato (planner)', to:'builders', did:'Scored the experiments. Exp 2 won with 0.86.', decisions:['Fix the query and retry with backoff (exp 2)'], findings:['Exp 3 failed npm test, disqualified'], files:['src/auth/session.go', 'net/retry.go'], open_questions:[], next:'Archimedes wraps the session call in withRetry(). Euclid tidies retry.go.' },
@@ -502,11 +540,11 @@ function noteHtml(n) {
 
 // ---------- Homer narrates what is happening and why ----------
 const NARR = {
-  intake:    '{id} arrived at the Gates of {city}. Solon reads it to find the goal, the linked tickets and what counts as done.',
+  intake:    '{id} arrived at the Gates of {city}. Pericles picked it off the board because it says what to do and how to tell when it is done.',
   research:  'The Library is busy. Herodotus traces where the timeout lives while Thales lists the ways to check the result, because nothing is built before we know how to prove it works.',
-  plan:      'Aristotle draws the plan at the Academy and walks over to Solon, who sizes the team: two builders, and one executor for the config step because it is fully spelled out.',
+  plan:      'Aristotle draws the plan at the Academy. Pericles asks the owner on the ticket whether the 45 second limit is firm, so nobody has to guess.',
   human:     'Work in {city} pauses. Plato is waving at the Agora: he needs your answer before planning can go on. Click him to reply.',
-  symposium: 'The Symposium is being prepared. Aristotle found three workable approaches and none is clearly better, so Solon opened three experiment branches, one builder each. The best score wins.',
+  symposium: 'The Symposium is being prepared. Aristotle found three workable approaches and none is clearly better, so the engine opened three experiment branches, one builder each. The best score wins.',
   build:     'Experiment 2 scored best, so its approach goes into the job branch. Archimedes and Euclid build it at the Workshop.',
   checking:  'Archimedes climbs the stair to the Oracle. The checks you picked run now: npm test on the host and the e2e suite in a container.',
   failed:    'Red smoke over Delphi: 2 of 214 tests failed. Archimedes walks to Euclid to talk it through, and the failure notes go back to the Workshop.',
@@ -584,7 +622,8 @@ function useJob(j) {
   if (concert) { concert.audio?.pause(); for (const id of concertIds()) delete agents[id]; concert = null; djButton(); }
   ufo = null; closeDrawer(); hidePop(); applySetup(j.st.setup);
 }
-const STEPS = [['gates','Gates'],['library','Library'],['council','Council'],['academy','Academy'],['workshop','Workshop'],['oracle','Oracle'],['areopagus','Court'],['harbour','Harbour']];
+// the steps every job goes through, in order (the Library and the Council house are off the road)
+const STEPS = [['gates','Start'],['academy','Plan'],['workshop','Build'],['oracle','Checks'],['areopagus','Review'],['harbour','Ship']];
 const AT = { idle:null, intake:'gates', research:'library', plan:'academy', symposium:'academy', build:'workshop', checking:'oracle', failed:'oracle', passed:'oracle', review:'areopagus', human:null, ship:'harbour' };
 const jobCost = j => Object.values(j === cur ? cost : j.st.cost).reduce((a, b) => a + b, 0);
 const jobSetup = j => j === cur ? setup : j.st.setup;
@@ -1180,7 +1219,7 @@ async function stopJob(j) {
   if (!r.ok) narrate(`Couldn't stop ${j.id}: ${await r.text()}`);
 }
 const POOL = {
-  scheduler: ['One builder for retry.go, one executor for the config change.', 'Three approaches with small diffs. A Symposium is worth it here.', 'Waiting on the plan before I assign builders.', 'Executor gets the config step, it is fully spelled out.'],
+  product: ['HF-12 has no done-when yet. Asking the owner.', 'HF-9 and HF-14 are the same bug. Linking them.', 'HF-7 is ready: starting a job on it.', 'This one is three tickets in one. Splitting it.'],
   researcher: ['Opening auth/session.go to see where the timeout is set.', 'There is a retry helper in net/retry.go. Worth checking before writing a new one.', 'The ticket says logins fail after 30s on slow networks.', 'Found npm test and a Playwright suite under e2e/.', 'ABC-98 touched the same session code last month.'],
   planner: ['Two ways to fix this: raise the timeout, or retry with backoff.', 'Retry is safer. The timeout is already long.', 'Splitting into two subtasks: the config change and the retry wrapper.', 'Drawing the flow from the login form to the session store.'],
   builder: ['Wrapping the session call in withRetry().', 'Moving the 30s value into config instead of leaving it inline.', 'Running npm test to see where it stands.', 'Two tests fail on the mock clock. Looking at why.', 'The mock clock does not advance during backoff. Fixing the wait.'],
@@ -1681,6 +1720,7 @@ function openStream() {
   liveStream.onmessage = m => {
     try {
       const e = JSON.parse(m.data); if (!e.job) return;
+      if (e.job.startsWith('triage-')) { onTriageEvent(e); return; }
       let j = JOBS.find(q => q.id === e.job);
       if (!j && e.type === 'job.started') j = addLiveJob({ id:e.job, title:e.data?.title || e.job, repo:e.data?.repo, state:'starting', started:e.time });
       if (j) onEvent(j, e);
@@ -1718,6 +1758,8 @@ async function goLive() {
   LIVE = true; stopPlay();
   document.getElementById('play').style.display = 'none';
   document.getElementById('newtask').style.display = '';
+  document.getElementById('board').style.display = '';
+  fetch('/api/triage/boards', { cache:'no-store' }).then(r => r.json()).then(x => { BOARD.boards = x.boards || []; BOARD.yt = x.youtrack || {}; boardBadge(); }).catch(() => {});
   // drop the demo: one quiet city until the first real job arrives
   JOBS.length = 0;
   const lobby = makeLobby();
@@ -1867,6 +1909,7 @@ addEventListener('keydown', e => {
   if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName) || open || e.metaKey || e.ctrlKey) return;
   if ((e.key === 'a' || e.key === 'A') && LIVE) openAdmin();
   if ((e.key === 'n' || e.key === 'N') && LIVE) openTask();
+  if ((e.key === 'b' || e.key === 'B') && LIVE) openBoard();
 }, true);
 
 // ---------- Admin opens over the map ----------
@@ -1968,6 +2011,153 @@ document.getElementById('ntf').onsubmit = async ev => {
   closeModal('m-task');
   enterCity(addLiveJob({ id, title:body.notes ? body.notes.split('\n')[0] : body.issue, repo:body.repo, state:'starting' }));
 };
+// ---------- Board: Pericles, the product agent, runs a project's tickets ----------
+// You pick a repo, run him now, or let him run on his own when something
+// happens on the board. The engine holds every limit (docs/TRIAGE.md).
+const BOARD = { sel:null, boards:[], yt:{}, runs:[], timer:null, drawn:null };
+const LEVEL_SAID = {
+  observe:'Observe: he reads the board and changes nothing. You get his report.',
+  propose:'Propose: every change he wants waits in Admin → Review queue for you to approve.',
+  file:'File: his comments and new tickets go out; field and state changes wait for you.',
+  fix:'Fix: he runs the board himself: comments, new tickets, fields and states on any ticket in the project.' };
+const boardOpen = () => document.getElementById('m-board').classList.contains('open');
+const ticketLink = id => BOARD.yt.url ? `<a href="${escHTML(BOARD.yt.url.replace(/\/+$/, ''))}/issue/${encodeURIComponent(id)}" target="_blank" rel="noopener">${escHTML(id)}</a>` : escHTML(id);
+const runAgo = t => { const s = (Date.now() - Date.parse(t)) / 1000; return !isFinite(s) ? '' : s < 90 ? 'just now' : s < 5400 ? Math.round(s / 60) + ' min ago' : s < 129600 ? Math.round(s / 3600) + ' h ago' : new Date(t).toLocaleDateString(); };
+async function openBoard(repo) {
+  if (repo) BOARD.sel = repo;
+  else if (!BOARD.sel) { try { BOARD.sel = localStorage.getItem('board') || null; } catch {} }
+  BOARD.drawn = null; openModal('m-board');
+  await boardLoad();
+  clearInterval(BOARD.timer);
+  BOARD.timer = setInterval(() => boardOpen() ? boardLoad() : clearInterval(BOARD.timer), 4000);
+}
+async function boardLoad() {
+  try {
+    const d = await (await fetch('/api/triage/boards', { cache:'no-store' })).json();
+    BOARD.boards = d.boards || []; BOARD.yt = d.youtrack || {};
+  } catch { document.getElementById('bd-pane').innerHTML = '<p class="empty">The engine is not answering.</p>'; return; }
+  boardBadge();
+  if (!BOARD.boards.some(b => b.repo === BOARD.sel)) BOARD.sel = BOARD.boards[0]?.repo || null;
+  if (BOARD.sel) { try { BOARD.runs = (await (await fetch('/api/triage?' + new URLSearchParams({ repo:BOARD.sel }), { cache:'no-store' })).json()).runs || []; } catch { BOARD.runs = []; } }
+  boardDraw();
+}
+function boardBadge() { document.getElementById('board').classList.toggle('working', BOARD.boards.some(b => b.running)); }
+function boardDraw() {
+  const list = document.getElementById('bd-list'), pane = document.getElementById('bd-pane');
+  list.innerHTML = '<small>Repositories</small>' + (BOARD.boards.length ? BOARD.boards.map(b => `<button type="button" data-repo="${escHTML(b.repo)}" class="${b.repo === BOARD.sel ? 'on' : ''}" title="${escHTML(b.repo)}">
+      <span>${escHTML(PROJECTS[b.repo] || b.name)}</span><small>${b.project ? escHTML(b.project) + ' · ' : ''}${b.running ? 'Pericles is working' : b.auto.on ? 'runs on his own' : 'runs when you say'}</small></button>`).join('')
+    : '<p class="empty">No repositories yet. Start a job with New task first; its repository shows up here.</p>');
+  list.querySelectorAll('[data-repo]').forEach(btn => btn.onclick = () => { BOARD.sel = btn.dataset.repo; try { localStorage.setItem('board', BOARD.sel); } catch {} BOARD.drawn = null; boardLoad(); });
+  const b = BOARD.boards.find(q => q.repo === BOARD.sel);
+  if (!b) { pane.innerHTML = '<p class="intro">Pericles goes over a project\'s tickets in YouTrack. Pick a repository on the left.</p>'; BOARD.drawn = null; return; }
+  // the forms are drawn once per repo, so a refresh never eats what you type
+  if (BOARD.drawn !== b.repo) { BOARD.drawn = b.repo; pane.innerHTML = boardForms(b); boardWire(b); }
+  boardStatus(b);
+  document.getElementById('bd-runs').innerHTML = BOARD.runs.length ? BOARD.runs.map(runCard).join('') : '<p class="empty">No runs yet. Run him now, or turn on the schedule above.</p>';
+  document.querySelectorAll('#bd-runs [data-stop]').forEach(x => x.onclick = async () => { x.disabled = true; await fetch(`/api/triage/${x.dataset.stop}/stop`, { method:'POST' }); boardLoad(); });
+  document.querySelectorAll('#bd-runs [data-job]').forEach(x => x.onclick = ev => { ev.preventDefault(); const j = JOBS.find(q => q.id === x.dataset.job); if (j) { closeModal('m-board'); enterCity(j); } });
+}
+const levelOptions = (sel, dflt) => `<option value="">The project's level (${escHTML(dflt || 'fix')})</option>` + Object.keys(LEVEL_SAID).map(l => `<option value="${l}"${l === sel ? ' selected' : ''}>${l[0].toUpperCase() + l.slice(1)}</option>`).join('');
+function boardForms(b) {
+  const a = b.auto, ytOK = BOARD.yt.configured;
+  return `<p class="intro"><b>Pericles</b> reads the open tickets in <b>${escHTML(b.project || 'the YouTrack project')}</b> and the code behind them. He fills in missing fields, splits tickets that are too big, links duplicates, files tickets for broken things nobody wrote up, and asks the owner on the ticket when it can't be built as written. Then he starts jobs on the ready ones, highest priority first. Each job shows up as a city on the map.</p>
+  ${ytOK ? '' : '<p class="intro" style="color:var(--fail)">YouTrack isn\'t set up yet. <a href="#" id="bd-yt">Set it up in Admin → Connections</a>, then come back.</p>'}
+  <section><h3>Run him now</h3>
+    <form id="bd-run" style="display:grid;gap:10px">
+      <div class="row3">
+        <label><b>YouTrack project</b>${b.mapped ? 'from factory.yml' : 'its short name'}<input name="project" value="${escHTML(b.project || '')}" placeholder="HF" ${b.mapped ? 'readonly' : ''} autocomplete="off" style="text-transform:uppercase;font-family:'JetBrains Mono', monospace"></label>
+        <label><b>Jobs he may start</b>0 means he only recommends<input name="jobs" type="number" min="0" max="10" value="2"></label>
+        <label><b>Time limit</b>minutes<input name="minutes" type="number" min="5" max="240" value="30"></label>
+      </div>
+      <label><b>What he may change</b><select name="level">${levelOptions('', b.level)}</select><span data-said></span></label>
+      <label><b>Focus</b> optional: what to look at first, in your words<textarea name="focus" rows="2" placeholder="e.g. the export bugs, or tickets tagged customer"></textarea></label>
+      <div class="acts"><button type="submit" class="primary" ${ytOK ? '' : 'disabled'}>Run Pericles now</button><span class="msg" data-msg></span></div>
+    </form>
+  </section>
+  <section><h3>His runs</h3><div id="bd-runs" style="display:grid;gap:8px"></div></section>
+  <section><h3>Let him run on his own</h3>
+    <p>Off until you turn it on. When it's on, the engine looks every 5 minutes and starts a run only when one of the things you tick has happened since his last run. It never starts one while a run is going, waits at least the gap after the last one, and stops at the daily limit.</p>
+    <form id="bd-auto" style="display:grid;gap:10px">
+      <label class="check"><input type="checkbox" name="on" ${a.on ? 'checked' : ''}><span><b>Run on his own for this repository</b></span></label>
+      <label class="check"><input type="checkbox" name="on_answers" ${a.on_answers ? 'checked' : ''}><span><b>An owner answered one of his questions</b> on the ticket, so he can carry on with it.</span></label>
+      <label class="check"><input type="checkbox" name="on_board" ${a.on_board ? 'checked' : ''}><span><b>Someone created or changed a ticket</b> in the project. Changes the factory made itself don't count.</span></label>
+      <label class="check"><input type="checkbox" name="on_ready" ${a.on_ready ? 'checked' : ''}><span><b>His jobs are done and he left ready tickets</b> because he hit the job limit, so he can start the next ones.</span></label>
+      <div class="row3">
+        <label><b>Jobs per run</b>0 means he only recommends<input name="max_jobs" type="number" min="0" max="10" value="${a.max_jobs || 0}"></label>
+        <label><b>Gap</b>minutes between runs<input name="gap_minutes" type="number" min="10" max="1440" value="${a.gap_minutes}"></label>
+        <label><b>Daily limit</b>runs a day<input name="per_day" type="number" min="1" max="48" value="${a.per_day}"></label>
+      </div>
+      <label><b>What he may change</b><select name="level">${levelOptions(a.level, b.level)}</select><span data-said></span></label>
+      <div class="acts"><button type="submit">Save</button><span class="msg" data-msg></span></div>
+      <div class="note" id="bd-last"></div>
+    </form>
+  </section>`;
+}
+function boardWire(b) {
+  const yt = document.getElementById('bd-yt'); if (yt) yt.onclick = ev => { ev.preventDefault(); closeModal('m-board'); openAdmin('connections'); };
+  for (const f of [document.getElementById('bd-run'), document.getElementById('bd-auto')]) {
+    const said = f.querySelector('[data-said]'), show = () => said.textContent = LEVEL_SAID[f.level.value || b.level || 'fix'];
+    f.level.onchange = show; show();
+  }
+  const run = document.getElementById('bd-run');
+  run.onsubmit = async ev => {
+    ev.preventDefault(); const msg = run.querySelector('[data-msg]'); msg.className = 'msg'; msg.textContent = 'Starting…';
+    const body = { repo:b.repo, project:run.project.value.trim().toUpperCase(), level:run.level.value, max_jobs:+run.jobs.value, minutes:+run.minutes.value, focus:run.focus.value.trim() };
+    const r = await fetch('/api/triage', { method:'POST', headers:{ 'content-type':'application/json' }, body:JSON.stringify(body) });
+    if (!r.ok) { msg.className = 'msg bad'; msg.textContent = (await r.text()).trim(); return; }
+    msg.textContent = 'He is on it. His run shows below.'; run.focus.value = ''; boardLoad();
+  };
+  const auto = document.getElementById('bd-auto');
+  auto.onsubmit = async ev => {
+    ev.preventDefault(); const msg = auto.querySelector('[data-msg]'); msg.className = 'msg'; msg.textContent = 'Saving…';
+    const body = { repo:b.repo, project:(run.project.value || b.project || '').trim().toUpperCase(), on:auto.on.checked, on_answers:auto.on_answers.checked, on_board:auto.on_board.checked, on_ready:auto.on_ready.checked,
+      max_jobs:+auto.max_jobs.value, gap_minutes:+auto.gap_minutes.value, per_day:+auto.per_day.value, level:auto.level.value };
+    const r = await fetch('/api/triage/auto', { method:'PUT', headers:{ 'content-type':'application/json' }, body:JSON.stringify(body) });
+    if (!r.ok) { msg.className = 'msg bad'; msg.textContent = (await r.text()).trim(); return; }
+    msg.textContent = body.on ? 'Saved. He runs on his own when one of these happens.' : 'Saved. He runs only when you say.'; boardLoad();
+  };
+}
+function boardStatus(b) {
+  const btn = document.querySelector('#bd-run button[type=submit]');
+  if (btn && BOARD.yt.configured) { btn.disabled = !!b.running; btn.textContent = b.running ? 'He is working…' : 'Run Pericles now'; }
+  const last = document.getElementById('bd-last');
+  if (last) last.textContent = b.auto.on ? (b.last_auto ? 'Last look: ' + b.last_auto : 'The engine takes its first look within 5 minutes.') : '';
+}
+function runCard(r) {
+  const state = r.state || 'running', rep = r.report, jobs = r.jobs || [], qs = r.questions || [];
+  const started = jobs.filter(x => x.job), recs = jobs.filter(x => !x.job);
+  const jobLine = x => `<li>${ticketLink(x.issue)}${x.job ? ` → job <a href="#" data-job="${escHTML(x.job)}">${escHTML(x.job)}</a>` : ''}${x.why ? ': ' + escHTML(x.why) : ''}</li>`;
+  const part = (label, items) => items.length ? `<div><div class="lbl">${label}</div><ul>${items.join('')}</ul></div>` : '';
+  return `<div class="run"><div class="top"><span class="pill ${escHTML(state)}">${escHTML(state === 'running' ? 'working' : state)}</span>
+      <small>${escHTML(runAgo(r.started))} · ${r.auto ? 'on his own: ' + escHTML(r.why || '') : escHTML(r.why || 'you started it')} · ${escHTML(r.level)}${r.max_jobs ? `, up to ${r.max_jobs} jobs` : ', recommend only'}</small>
+      ${state === 'running' ? `<button type="button" data-stop="${escHTML(r.id)}">Stop</button>` : ''}</div>
+    ${rep ? `<div>${escHTML(rep.summary)}</div>` : state === 'running' ? '<div class="note">Reading the board…</div>' : ''}
+    ${r.error ? `<div class="err">${escHTML(r.error)}</div>` : ''}
+    ${part('Started jobs', started.map(jobLine))}
+    ${part('Recommended', recs.map(jobLine))}
+    ${part('Asked the owner', qs.map(q => `<li>${ticketLink(q.issue)}: ${escHTML(q.question)}${q.on_ticket ? '' : ` <span class="note">(${escHTML(q.posted)})</span>`}</li>`))}
+    ${part('Ready, not started', (rep?.ready || []).map(x => `<li>${ticketLink(x)}</li>`))}
+    ${part('Waiting on the owner', (rep?.blocked || []).map(x => `<li>${escHTML(x)}</li>`))}</div>`;
+}
+document.getElementById('board').onclick = () => openBoard();
+// Homer tells what Pericles does; the Board panel refreshes when he acts
+function onTriageEvent(e) {
+  const old = new Date(e.time).getTime() < pageStart - 1500, d = e.data || {};
+  if (boardOpen()) boardLoad();
+  if (old) return;
+  const tell = t => narrate(t, cur, false);
+  switch (e.type) {
+    case 'triage.started': boardBadge(); fetch('/api/triage/boards', { cache:'no-store' }).then(r => r.json()).then(x => { BOARD.boards = x.boards || []; boardBadge(); }).catch(() => {});
+      tell(`Pericles goes over the ${d.project} board${d.auto ? `, on his own because ${d.why}` : ''}.`); break;
+    case 'triage.question': tell(`Pericles asks the owner on ${d.issue}: "${short_(d.question)}"`); break;
+    case 'triage.job': tell(d.job ? `Pericles starts a job on ${d.issue}: ${short_(d.why)}` : `Pericles recommends ${d.issue}: ${short_(d.why)}`); break;
+    case 'tracker.issue.created': tell(`Pericles filed ${d.issue}: ${short_(d.summary)}`); break;
+    case 'tracker.issue.moved': tell(`Pericles moved ${d.issue} to ${d.state}.`); break;
+    case 'tracker.draft': tell(`Pericles wants to ${short_(d.summary)}. It waits in Admin → Review queue for you.`); break;
+    case 'triage.ended': fetch('/api/triage/boards', { cache:'no-store' }).then(r => r.json()).then(x => { BOARD.boards = x.boards || []; boardBadge(); }).catch(() => {});
+      tell(d.state === 'done' ? `Pericles is done with the board: ${short_(d.summary || '')}` : `Pericles stopped (${d.state})${d.error ? ': ' + short_(d.error) : ''}.`); break;
+  }
+}
 // first paint, once every const above is declared: the map's countries and
 // islands read COUNTRY_INK, PROJECTS and projectName, which come after the
 // scene code

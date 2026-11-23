@@ -10,10 +10,10 @@ A web canvas set in ancient Greece shows each agent as a philosopher. You can se
 
 ```mermaid
 flowchart TD
+    BD["Board: the product agent (Pericles) picks ready tickets"] --> T
     T["Ticket + complexity hint"] --> S0["0. Survey: list every way to check the result"]
     S0 --> U{"User picks checks"}
-    U --> SCH["Scheduler (Solon) splits the work"]
-    SCH --> R["1. Research"]
+    U --> R["1. Research"]
     R --> P["2. Plan"]
     P -->|"more than one approach"| SYM["Symposium"]
     P --> B["3. Build"]
@@ -57,7 +57,7 @@ Agents that run unattended leave no record a person can follow afterwards.
 | # | Decision |
 |---|---|
 | D1 | The Go engine does all the legwork: scheduling, process control, git, tracker calls, the event log and the web server. Tracker calls run on behalf of the operations agent (D2), through the engine's tracker client. |
-| D2 | The Go engine is the only control plane. Every trigger, timer, webhook, process start and stop, retry, phase change, message and upload passes through it. Agents, including the scheduler agent, send requests. The agent decides, the engine executes: the operations agent (Hermes, role `ops`) gets a typed set of tracker tools (create, search, read, comment, update, move, link, attach), and the engine runs each call through its tracker client, keeps the token, logs every call as an event and enforces the limits (mapped project, cap on issues created, control level, no deleting). Agents never see the token and never send raw tracker commands. |
+| D2 | The Go engine is the only control plane. Every trigger, timer, webhook, process start and stop, retry, phase change, message and upload passes through it. Agents, including the product agent, send requests. The agent decides, the engine executes: the operations agent (Hermes, role `ops`) gets a typed set of tracker tools (create, search, read, comment, update, move, link, attach), and the engine runs each call through its tracker client, keeps the token, logs every call as an event and enforces the limits (mapped project, cap on issues created, control level, no deleting). Agents never see the token and never send raw tracker commands. |
 | D3 | No new tests by default. When a job starts, agents list every existing way to check the result. The user picks which ones to use, picks none, or asks for a new check built for this job. |
 | D4 | Ship mode is set per project: `commit`, `push` or `pr`. The default is `pr` (commit, push and open a PR). |
 | D5 | Plan approval happens only on request. The user gives a complexity hint at the start. If the task is complex and the user wants to iterate on the plan, the engine waits for approval. |
@@ -104,7 +104,7 @@ Agents that run unattended leave no record a person can follow afterwards.
 | Check | One way to confirm the work: a test suite, e2e run, typecheck, lint, build, app smoke run or project script. |
 | Check plan | The checks the user picked for a job. Agents can't change it. |
 | Phase | One stage of the pipeline: survey, research, plan, build, check, review, finalize. |
-| Role | The job an agent has: scheduler, researcher, planner, builder, reviewer, humanizer, finalizer. |
+| Role | The job an agent has: product, researcher, planner, builder, reviewer, humanizer, finalizer. |
 | Agent | One headless process (pi, claude or codex) playing a role, shown as a philosopher. |
 | Board | Shared space inside a job where agents post messages, notes and diagrams. |
 | Assembly | Shared channel between jobs running at the same time. |
@@ -118,7 +118,6 @@ The pipeline diagram is in §1. The steps are:
 | Step | What happens |
 |---|---|
 | 0. Survey | Agents look for every way to check the result: tests, e2e, typecheck, lint, build, running the app, scripts. The user then picks the checks. Plan approval is requested here if wanted. |
-| Scheduler | Solon splits the work and asks the engine to start agents. |
 | 1. Research | Ticket, dependencies, docs, related work, working tree. |
 | 2. Plan | Working docs and diagrams. More than one workable approach opens a Symposium. |
 | 3. Build | Builders implement. |
@@ -138,9 +137,11 @@ If the project has a saved check plan, the job uses it and moves on (D23). Other
 
 A new check is built first, as its own small step, and the user approves it. After that it's frozen like the other checks. Reviewers flag any change an agent makes to a check file.
 
-### 7.2 Scheduler
+### 7.2 The board
 
-Solon, the scheduler agent, reads the check plan and the research. It decides how many agents each role needs, splits the build into subtasks when they can run in parallel, and decides when a Symposium should open. It doesn't start anything itself. It sends requests, and the engine carries them out within the job's limits (D2).
+Pericles, the product agent, works between jobs. A triage run goes over one repo's board: he reads the open tickets and the code behind them, fixes what is missing on a ticket, asks the owner when a ticket can't be built as written, and asks the engine to start jobs on the ready ones. You start a run from the Board panel, or turn on the automatic schedule for a repo. He doesn't start anything himself. He sends requests, and the engine carries them out within the run's limits (D2). The details are in `docs/TRIAGE.md`.
+
+Inside a job the planner decides whether a Symposium is worth it, and the engine opens it.
 
 ### 7.3 Symposium
 
@@ -275,7 +276,7 @@ Each job has limits on loops per phase, tokens, cost and wall time. The job stop
 
 | Role | Philosophers | What it does | Parallel |
 |---|---|---|---|
-| Scheduler | Solon | Splits work, sizes the team, opens Symposiums. Only sends requests to the engine. | one per job |
+| Product | Pericles | Runs the board between jobs: fixes tickets, asks owners, starts jobs on ready tickets. Only sends requests to the engine. | one per board |
 | Researcher | Herodotus, Thales, Anaximander, Eratosthenes | Surveys checks. Reads the ticket, dependencies, docs, related work and code. Posts findings. | yes, split by area |
 | Planner | Aristotle, Plato | Turns research into a plan and working docs. Draws diagrams. | usually one |
 | Builder | Archimedes, Hero, Euclid, Pythagoras | Implements, runs checks, fixes failures. | yes, by subtask or experiment |
@@ -302,7 +303,7 @@ Default catalogue, read from the wire and editable in the admin panel (§12.2). 
 
 | Tier | Claude | GPT | Used for |
 |---|---|---|---|
-| think | `claude-opus-5-5` | `gpt-6.1-sol` | scheduler, planner, Symposium hypotheses, reviewers |
+| think | `claude-opus-5-5` | `gpt-6.1-sol` | product, planner, Symposium hypotheses, reviewers |
 | code | `claude-sonnet-5-5` | `gpt-6.1-terra` | builders, researchers, humanizer |
 | execute | `claude-haiku-5-5` | `gpt-6-luna` | executors, finalizer |
 
@@ -314,7 +315,7 @@ Which runtime can run which model:
 | Claude Code | yes | no |
 | Codex | no | yes |
 
-The engine refuses a role setting that pairs a runtime with a model it can't run, and the admin panel won't let you save one. Luna does poorly on long context, so the scheduler gives executors only short, self-contained steps.
+The engine refuses a role setting that pairs a runtime with a model it can't run, and the admin panel won't let you save one. Luna does poorly on long context, so executors get only short, self-contained steps.
 
 The engine makes the humanizer skill available to every runtime, by skill directory or by adding it to the prompt.
 
@@ -342,7 +343,7 @@ Each phase is a place in one pixel-art landscape: a coastal Greek city on a hill
 |---|---|
 | Intake | The Gates |
 | Survey and research | Library of Alexandria |
-| Scheduler | Council house (Bouleuterion), where Solon sits |
+| The board | Council house (Bouleuterion), where Pericles sits |
 | Plan | Academy |
 | Build | Workshop of Hephaestus |
 | Check | Oracle of Delphi, which gives the verdict |
@@ -560,7 +561,6 @@ checks:
 jobs:
   max_parallel: 3
 roles:                         # tier and count only; runtime and model come from the admin panel
-  scheduler:  { tier: think }
   planner:    { tier: think }
   researcher: { tier: code, count: 2 }
   builder:    { tier: code, count: 1 }
@@ -595,7 +595,7 @@ flowchart TD
         SV --> CP["Check plan (user picks)"]
         CP --> JSM["Job state machine"]
         ASM["Assembly (cross-job leases)"] <--> JSM
-        SCH["Scheduler requests"] --> JSM
+        BRD["Product agent requests"] --> JSM
         JSM --> SUP["Agent supervisor (start, stream, stop)"]
         SUP --> PI["pi-host (Node, Pi SDK)"]
         SUP --> CL["claude (CLI)"]
@@ -621,7 +621,7 @@ What exists in M0 today is in `docs/ENGINE.md` §1.
 |---|---|
 | A0 Art | The full asset catalogue: palette, scene, buildings, portraits, icons, UI frames, fonts. Every asset drawn, exported and shown on one preview page before any app code (D30). |
 | M0 Spine (done) | Go engine, `factory serve`, Pi sidecar with one builder, user-picked checks with healing loop, enforced handoff, worktree, metering gateway, event log and stream. See `docs/ENGINE.md` §8. |
-| M1 Pipeline | Survey and check plan, all roles, scheduler, board and MCP tools, Claude and Codex runtimes, ship modes. |
+| M1 Pipeline | Survey and check plan, all roles, board and MCP tools, Claude and Codex runtimes, ship modes. |
 | M2 Canvas | Greek landscape, philosopher portraits, detail panel, messages and status. Then media gallery, diagrams and replay. |
 | M3 Tracker | YouTrack settings, load ticket by ID, comments, state changes, dependencies and related tickets. |
 | M4 Quality and Symposium | Reviewer rubrics, humanizer pass, docs cleanup, overfitting checks, experiment branches and scoring. |

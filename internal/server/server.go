@@ -24,6 +24,7 @@ import (
 	"factory/internal/patrol"
 	"factory/internal/runtime"
 	"factory/internal/store"
+	"factory/internal/triage"
 	"factory/internal/youtrack"
 )
 
@@ -41,7 +42,14 @@ type Server struct {
 	mu     sync.Mutex
 	jobs   map[string]*job.Job
 	passes map[string]*patrol.Pass
-	n      int
+	triage map[string]*triage.Run
+	// TriageEvery is how often the automatic schedule looks at the boards;
+	// zero turns the schedule off (tests).
+	TriageEvery time.Duration
+	autoMu      sync.Mutex
+	autoNote    map[string]string // repo -> what the schedule last decided
+	looping     bool
+	n           int
 }
 
 func (s *Server) Handler() http.Handler {
@@ -49,6 +57,11 @@ func (s *Server) Handler() http.Handler {
 		s.jobs = map[string]*job.Job{}
 	}
 	s.startOps()
+	s.loadTriage()
+	if s.TriageEvery > 0 && !s.looping {
+		s.looping = true
+		go s.triageLoop(context.Background(), s.TriageEvery)
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/jobs", s.startJob)
 	mux.HandleFunc("GET /api/jobs", s.listJobs)
@@ -66,6 +79,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/tools/{job}/{agent}/{tool}", s.tool)
 	s.adminRoutes(mux)
 	s.passRoutes(mux)
+	s.triageRoutes(mux)
 	s.opsRoutes(mux)
 	mux.HandleFunc("POST /mcp/{job}/{agent}", s.mcp)
 	mux.Handle("/llm/", s.Gateway)
@@ -94,6 +108,23 @@ func (s *Server) startJob(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	id, code, err := s.launch(r.Context(), spec)
+	if err != nil {
+		http.Error(w, err.Error(), code)
+		return
+	}
+	writeJSON(w, map[string]any{"id": id})
+}
+
+// launchErr is a job that couldn't start, with the HTTP status that says why.
+func launchErr(code int, format string, a ...any) (string, int, error) {
+	return "", code, fmt.Errorf(format, a...)
+}
+
+// launch starts a job from its spec: a ticket ID is loaded from YouTrack,
+// the repo's factory.yml and the admin panel fill in the rest. It returns
+// the job's id, or an error with the HTTP status for it.
+func (s *Server) launch(ctx context.Context, spec job.Spec) (string, int, error) {
 	spec.Issue, spec.Notes = strings.TrimSpace(spec.Issue), strings.TrimSpace(spec.Notes)
 	ticketShip := "" // the ticket's Ship mode, read fresh for every job
 	if spec.Issue != "" && spec.Prompt == "" {
@@ -102,10 +133,9 @@ func (s *Server) startJob(w http.ResponseWriter, r *http.Request) {
 		client := youtrack.Client{URL: yt.URL, Token: yt.Token}
 		switch {
 		case client.Configured():
-			is, err := client.Issue(r.Context(), spec.Issue)
+			is, err := client.Issue(ctx, spec.Issue)
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusBadGateway)
-				return
+				return launchErr(http.StatusBadGateway, "%s", err.Error())
 			}
 			spec.Title = is.Summary
 			ticketShip = is.ShipMode()
@@ -116,8 +146,7 @@ func (s *Server) startJob(w http.ResponseWriter, r *http.Request) {
 		case spec.Notes != "":
 			spec.Prompt = spec.Notes // no YouTrack yet: the notes are the task
 		default:
-			http.Error(w, "YouTrack is not set up yet (Admin → Connections). Until it is, describe the task in the notes.", http.StatusBadRequest)
-			return
+			return launchErr(http.StatusBadRequest, "%s", "YouTrack is not set up yet (Admin → Connections). Until it is, describe the task in the notes.")
 		}
 		if spec.Title == "" {
 			spec.Title = firstLine(spec.Notes, 70)
@@ -127,23 +156,19 @@ func (s *Server) startJob(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if spec.Repo == "" || spec.Prompt == "" {
-		http.Error(w, "a repository and an issue ID (or a task description) are required", http.StatusBadRequest)
-		return
+		return launchErr(http.StatusBadRequest, "%s", "a repository and an issue ID (or a task description) are required")
 	}
 	root, err := repoRoot(spec.Repo)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+		return launchErr(http.StatusBadRequest, "%s", err.Error())
 	}
 	spec.Repo = root
 	proj, err := config.LoadProject(spec.Repo)
 	if err != nil {
-		http.Error(w, "factory.yml: "+err.Error(), http.StatusBadRequest)
-		return
+		return launchErr(http.StatusBadRequest, "%s", "factory.yml: "+err.Error())
 	}
 	if spec.Ship = config.ShipMode(ticketShip, proj.Ship); spec.Ship == "" {
-		http.Error(w, fmt.Sprintf("unknown ship mode (ticket %q, factory.yml %q); use commit, push or pr", ticketShip, proj.Ship), http.StatusBadRequest)
-		return
+		return launchErr(http.StatusBadRequest, "%s", fmt.Sprintf("unknown ship mode (ticket %q, factory.yml %q); use commit, push or pr", ticketShip, proj.Ship))
 	}
 	if len(spec.Checks) == 0 && strings.TrimSpace(spec.TestNotes) == "" {
 		spec.Checks = proj.Checks.SavedPlan // D23: use the saved plan when there is one
@@ -160,8 +185,7 @@ func (s *Server) startJob(w http.ResponseWriter, r *http.Request) {
 		spec.Model = role.Model
 	}
 	if p := config.CheckRole(config.Role{Runtime: spec.Runtime, Model: spec.Model}); p != "" {
-		http.Error(w, p, http.StatusBadRequest)
-		return
+		return launchErr(http.StatusBadRequest, "%s", p)
 	}
 	rt := s.Runtimes[spec.Runtime]
 	settings := config.LoadEngine()
@@ -209,7 +233,7 @@ func (s *Server) startJob(w http.ResponseWriter, r *http.Request) {
 	s.Bus.Place(j.ID, j.Dir())
 	s.Store.SaveJob(j.ID, spec.Issue, spec.Title, spec.Repo, spec, j.Started)
 	go j.Run(context.Background())
-	writeJSON(w, map[string]any{"id": j.ID})
+	return j.ID, http.StatusOK, nil
 }
 
 // continueJob gives a stuck job your guidance. A job still alive in the

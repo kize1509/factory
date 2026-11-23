@@ -43,8 +43,30 @@ type Service struct {
 	// PollEvery is how often a job's ticket is checked for new comments.
 	PollEvery time.Duration
 
-	mu     sync.Mutex
-	scopes map[string]*Scope
+	mu      sync.Mutex
+	scopes  map[string]*Scope
+	touched map[string]time.Time // when the factory last wrote to each ticket
+}
+
+// Touched is when the factory last changed the ticket, zero when it hasn't
+// since the engine started. A ticket updated later than this was changed
+// by a person.
+func (s *Service) Touched(issue string) time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.touched[strings.ToUpper(issue)]
+}
+
+func (s *Service) touch(issue string) {
+	if issue == "" {
+		return
+	}
+	s.mu.Lock()
+	if s.touched == nil {
+		s.touched = map[string]time.Time{}
+	}
+	s.touched[strings.ToUpper(issue)] = time.Now()
+	s.mu.Unlock()
 }
 
 // Scope is one job or pass the operations agent works for.
@@ -55,6 +77,11 @@ type Scope struct {
 	Level   string // observe, propose, file or fix
 	Ship    string // the job's ship mode, for the board's done state
 	Tracker config.Tracker
+	// Board names the agent that runs the board for this scope (the product
+	// agent in a triage run). It gets the tracker tools, and at the Fix level
+	// it may change state and fields on any ticket in the project, not only
+	// the ones the factory made.
+	Board string
 
 	svc      *Service
 	cap      int
@@ -183,6 +210,25 @@ func fromTicket(issue string) config.Tracker {
 	tr.States.Working, tr.States.Done = "In Progress", "Done"
 	return tr
 }
+
+// RegisterBoard registers a triage run: the scope of the agent that runs
+// the board for repo. project is the YouTrack project when factory.yml has
+// no tracker block.
+func (s *Service) RegisterBoard(id, repo, project, level, agent string) *Scope {
+	sc := s.Register(id, repo, "", "", level, true)
+	sc.mu.Lock()
+	if !sc.Enabled() && project != "" {
+		tr := fromTicket(project + "-1")
+		tr.Level, tr.MaxCreatedPerJob, tr.MaxCreatedPerPass = sc.Tracker.Level, sc.Tracker.MaxCreatedPerJob, sc.Tracker.MaxCreatedPerPass
+		sc.Tracker = tr
+	}
+	sc.Board = agent
+	sc.mu.Unlock()
+	return sc
+}
+
+// Scope returns a registered scope, or nil.
+func (s *Service) Scope(id string) *Scope { return s.scope(id) }
 
 func (s *Service) scope(id string) *Scope {
 	s.mu.Lock()
@@ -449,7 +495,8 @@ func (s *Service) Write(sc *Scope, agent string, a Action) (string, error) {
 		sc.created++
 		sc.mu.Unlock()
 	}
-	foreign := (a.Kind == "update" || a.Kind == "move") && !s.ownsTicket(sc, a.Issue)
+	foreign := (a.Kind == "update" || a.Kind == "move") && !s.ownsTicket(sc, a.Issue) &&
+		!(sc.Board != "" && agent == sc.Board && sc.Level == "fix") // the board's own agent at Fix runs the whole board
 	stateChange := a.Kind == "update" || a.Kind == "move"
 	if sc.Level == "propose" || foreign || (sc.Level == "file" && stateChange) {
 		return s.draft(sc, agent, a, foreign)
@@ -496,6 +543,7 @@ func (s *Service) execute(sc *Scope, agent string, a Action) (issue, msg string,
 	if err != nil {
 		return "", "", err
 	}
+	defer func() { s.touch(issue) }()
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	data := func(typ string, extra map[string]any) {
@@ -622,6 +670,15 @@ func (s *Service) Approve(id int64) (string, error) {
 		sc = &Scope{ID: d.Job, Repo: d.Repo, svc: s}
 		if p, e := config.LoadProject(d.Repo); e == nil {
 			sc.Tracker = p.Tracker.Normalised()
+		}
+		if !sc.Enabled() { // no tracker block: the project the draft itself names
+			ref := a.Issue
+			if ref == "" && a.Project != "" {
+				ref = a.Project + "-1"
+			}
+			if issueRe.MatchString(ref) {
+				sc.Tracker = fromTicket(ref).Normalised()
+			}
 		}
 	}
 	if err := sc.validate(&a); err != nil {

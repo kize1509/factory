@@ -97,8 +97,9 @@ func serve(args []string) {
 		model = "anthropic/claude-sonnet-5-5"
 	}
 	s := &server.Server{
-		Bus:     bus,
-		Gateway: gateway.New(wire, bus),
+		TriageEvery: 5 * time.Minute, // the product agent's automatic schedule, for the repos you turned it on for
+		Bus:         bus,
+		Gateway:     gateway.New(wire, bus),
 		Runtimes: map[string]runtime.Runtime{
 			"pi":          &runtime.Pi{HostDir: filepath.Join(*root, "pi-host"), AgentDir: filepath.Join(home, "pi-agent"), Engine: engine, Bus: bus},
 			"claude-code": &runtime.Claude{Engine: engine, Bus: bus},

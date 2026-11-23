@@ -104,7 +104,7 @@ Each building has an idle state and an active state (lit windows, open doors, ba
 |---|---|---|---|---|
 | `bldg/gates` | 64×56 | 1 + active | Intake | Two columns with a lintel and a bronze gate. Active: gate open, banner with the ticket count. |
 | `bldg/library` | 80×56 | 1 + active | Survey and research | Wide hall with scroll shelves visible through the columns. Active: lamps lit. |
-| `bldg/council` | 64×48 | 1 + active | Scheduler | Small round council house with a stepped roof. Active: smoke from the hearth. |
+| `bldg/council` | 64×48 | 1 + active | The board (product agent) | Small round council house with a stepped roof. Active: smoke from the hearth. |
 | `bldg/academy` | 72×56 | 1 + active | Plan | Low building in an olive grove, a sundial out front. Active: a tablet with lines on an easel. |
 | `bldg/workshop` | 72×56 | 4 (fire) + active | Build | Stone forge with an anvil and chimney. Fire loops while active, embers only when idle. |
 | `bldg/oracle` | 64×72 | 4 (smoke) + pass/fail | Check | Temple on the mountain ledge with a tripod. Smoke loops while checks run. After a run the smoke turns `ok` or `fail` for a few seconds. |
@@ -148,7 +148,7 @@ Each philosopher has a 32×32 bust, a 4-frame talking version of it (mouth close
 
 | ID | Role | What makes them recognisable |
 |---|---|---|
-| `portrait/solon` | Scheduler | Older, short grey beard, laurel band, holding a wax tablet |
+| `portrait/pericles` | Product | Older, short grey beard, laurel band, holding a wax tablet |
 | `portrait/herodotus` | Researcher | Curly dark beard, travel cloak, scroll under the arm |
 | `portrait/thales` | Researcher | Long white beard, looking up, small star above the head |
 | `portrait/anaximander` | Researcher | Trimmed beard, holding a round map |
@@ -205,7 +205,7 @@ Runtime glyphs are simple letters or symbols drawn in pixel style. They don't co
 
 | ID | Role | Symbol |
 |---|---|---|
-| `badge/scheduler` | Scheduler | wax tablet and stylus |
+| `badge/product` | Product | wax tablet and stylus |
 | `badge/researcher` | Researcher | scroll |
 | `badge/planner` | Planner | compass |
 | `badge/builder` | Builder | hammer |
@@ -284,9 +284,9 @@ The app never draws anything new while it runs. It picks a prepared setup that m
 | Setup | When | Scene |
 |---|---|---|
 | No jobs | nothing running | quiet city, ship docked |
-| Ticket arrives | job started | Gates open with the banner, Solon reading the ticket |
+| Ticket arrives | job started | Gates open with the banner, Pericles bringing the ticket in |
 | Research | survey and research | Library lamps lit, researchers in front |
-| Plan | planning | Academy windows lit with the easel out, Solon at the Council house hearth |
+| Plan | planning | Academy windows lit with the easel out, Pericles at the Council house hearth |
 | Symposium | experiments running | banquet hall torches lit, one builder per experiment |
 | Build | building | forge fire burning, builders at the Workshop |
 | Checks running | checks running | Oracle smoke rising |
@@ -308,7 +308,7 @@ Music lives in `web/songs/`, one folder per DJ, listed in `web/songs/songs.js`. 
 
 ## 14c. Narration
 
-Homer, the narrator, sits in a caption at the bottom of the map and tells in plain words what is happening and why, for example: "The Symposium is being prepared. Aristotle found three workable approaches and none is clearly better, so Solon opened three experiment branches, one builder each." He speaks on every phase change, missing handoff, message you send, process you stop and DJ set. Clicking the caption, or the Chronicle button, opens the full history per city, newest first.
+Homer, the narrator, sits in a caption at the bottom of the map and tells in plain words what is happening and why, for example: "The Symposium is being prepared. Aristotle found three workable approaches and none is clearly better, so the engine opened three experiment branches, one builder each." He speaks on every phase change, missing handoff, message you send, process you stop and DJ set. Clicking the caption, or the Chronicle button, opens the full history per city, newest first.
 
 ## 14b. Legend and explanations
 

@@ -2,17 +2,17 @@ package art
 
 // PlaceAbout explains each place for the legend.
 var PlaceAbout = map[string]string{
-	"gates":     "Tickets arrive here when you start a task.",
-	"library":   "Survey and research: the ticket, docs, related work and code, and the ways to check the result.",
-	"council":   "Solon schedules the work: how many agents, which subtasks, and when to open a Symposium.",
-	"academy":   "Planning: working docs, diagrams and the plan.",
-	"symposium": "Experiments: several approaches on separate branches, scored and compared.",
-	"workshop":  "Building: builders and executors write the code.",
-	"oracle":    "Checks run here. Green smoke means pass, red means fail.",
-	"areopagus": "Review: hardcoding, overfitting, edge cases and simplicity.",
+	"gates":     "Step 1. Tickets arrive here when a job starts, from you or from Pericles.",
+	"library":   "Research: the ticket, docs, related work and code, and the ways to check the result.",
+	"council":   "Pericles, the product agent, runs the board from here: he reads the open tickets, asks owners about the unclear ones and sends the ready ones to be built.",
+	"academy":   "Step 2. Aristotle reads the code and writes the plan.",
+	"symposium": "Step 2b, only for hard work. Several approaches on separate branches, scored and compared.",
+	"workshop":  "Step 3. Builders write the code.",
+	"oracle":    "Step 4. Checks run here. Green smoke means pass, red means fail.",
+	"areopagus": "Step 5. Review: hardcoding, overfitting, edge cases and simplicity.",
 	"agora":     "The public square. Agents meet here, and wait here when they need you.",
 	"theatre":   "The DJ plays sets here. Idle philosophers come to dance.",
-	"harbour":   "Shipping: commit, push and PR. The ship sails when work goes out.",
+	"harbour":   "Step 6. Shipping: commit, push and PR. The ship sails when work goes out.",
 	"olympus":   "Home of the gods, above the clouds. Watch for lightning.",
 	"horse":     "A wooden horse left on the plain. Nobody knows what is inside.",
 	"poseidon":  "The sea god's temple on the cliff at the end of the cape.",
@@ -22,7 +22,7 @@ var PlaceAbout = map[string]string{
 
 // PeopleAbout says what each character does, for the legend.
 var PeopleAbout = map[string]string{
-	"solon":        "Splits the work and sizes the team.",
+	"pericles":     "Runs the board: fixes tickets, asks owners, starts jobs on ready tickets.",
 	"herodotus":    "Digs through docs, history and related tickets.",
 	"thales":       "Finds the ways to check the result.",
 	"anaximander":  "Maps the codebase.",
