@@ -87,19 +87,19 @@ var mcpTools = []map[string]any{
 		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"kind": str_(), "text": str_(), "issues": list_()}, "required": []string{"kind", "text"}},
 	},
 	{
-		"name": "tracker_search", "description": "Hermes only: search the tracker with a YouTrack query (the mapped project is added).",
+		"name": "tracker_search", "description": "Hermes and the product agent: search the tracker with a YouTrack query (the mapped project is added).",
 		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"query": str_()}, "required": []string{"query"}},
 	},
 	{
-		"name": "tracker_read", "description": "Hermes only: read one issue with its comments, links, attachments, tags and recent changes.",
+		"name": "tracker_read", "description": "Hermes and the product agent: read one issue with its comments, links, attachments, tags and recent changes.",
 		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"id": str_()}, "required": []string{"id"}},
 	},
 	{
-		"name": "knowledge_search", "description": "Hermes only: search the notes the factory kept (decisions, findings, blockers, user notes).",
+		"name": "knowledge_search", "description": "Hermes and the product agent: search the notes the factory kept (decisions, findings, blockers, user notes).",
 		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"query": str_()}, "required": []string{"query"}},
 	},
 	{
-		"name": "tracker_create", "description": "Hermes only: create an issue in the mapped project. Description: what is wrong today, Expected, Done when, with file paths and line hints.",
+		"name": "tracker_create", "description": "Hermes and the product agent: create an issue in the mapped project. Description: what is wrong today, Expected, Done when, with file paths and line hints.",
 		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{
 			"project": str_(), "summary": str_(), "description": str_(), "type": str_(), "priority": str_(), "subsystem": str_(), "complexity": str_(), "ship_mode": str_(),
 			"tags":  list_(),
@@ -107,23 +107,23 @@ var mcpTools = []map[string]any{
 		}, "required": []string{"summary", "description"}},
 	},
 	{
-		"name": "tracker_update", "description": "Hermes only: set fields (Type, Priority, Subsystem, Complexity, Ship mode, Assignee, State) on an issue.",
+		"name": "tracker_update", "description": "Hermes and the product agent: set fields (Type, Priority, Subsystem, Complexity, Ship mode, Assignee, State) on an issue.",
 		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"id": str_(), "fields": map[string]any{"type": "object", "additionalProperties": str_()}}, "required": []string{"id", "fields"}},
 	},
 	{
-		"name": "tracker_move", "description": "Hermes only: move an issue to a state on the board.",
+		"name": "tracker_move", "description": "Hermes and the product agent: move an issue to a state on the board.",
 		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"id": str_(), "state": str_()}, "required": []string{"id", "state"}},
 	},
 	{
-		"name": "tracker_comment", "description": "Hermes only: comment on an issue.",
+		"name": "tracker_comment", "description": "Hermes and the product agent: comment on an issue.",
 		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"id": str_(), "text": str_()}, "required": []string{"id", "text"}},
 	},
 	{
-		"name": "tracker_link", "description": "Hermes only: link an issue to another (subtask of, parent for, relates to, duplicates, is duplicated by, depends on, is required for), optionally with a tag.",
+		"name": "tracker_link", "description": "Hermes and the product agent: link an issue to another (subtask of, parent for, relates to, duplicates, is duplicated by, depends on, is required for), optionally with a tag.",
 		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"id": str_(), "type": str_(), "target": str_(), "tag": str_()}, "required": []string{"id", "type", "target"}},
 	},
 	{
-		"name": "tracker_attach", "description": "Hermes only: attach a file (screenshot, video, log) from the repo or the factory's folder to an issue.",
+		"name": "tracker_attach", "description": "Hermes and the product agent: attach a file (screenshot, video, log) from the repo or the factory's folder to an issue.",
 		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"id": str_(), "path": str_()}, "required": []string{"id", "path"}},
 	},
 	{
@@ -133,6 +133,18 @@ var mcpTools = []map[string]any{
 	{
 		"name": "handover", "description": "Hermes only: end a handover with context, decisions, open points and links for the next agent.",
 		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"context": str_(), "decisions": list_(), "open_points": list_(), "links": list_()}, "required": []string{"context"}},
+	},
+	{
+		"name": "ask_owner", "description": "Product agent only: put one question to a ticket's owner. It goes on the ticket as a comment; the owner answers there.",
+		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"issue": str_(), "question": str_()}, "required": []string{"issue", "question"}},
+	},
+	{
+		"name": "start_job", "description": "Product agent only: ask the engine to start a job on a ready ticket. why is one line; notes is what the job should know.",
+		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"issue": str_(), "why": str_(), "notes": str_()}, "required": []string{"issue", "why"}},
+	},
+	{
+		"name": "finish_triage", "description": "Product agent only: end the triage run with a summary, the ready tickets you didn't start, and the tickets waiting on the owner.",
+		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"summary": str_(), "ready": list_(), "blocked": list_()}, "required": []string{"summary"}},
 	},
 	{
 		"name":        "set_status",
@@ -188,6 +200,15 @@ func (s *Server) mcp(w http.ResponseWriter, r *http.Request) {
 			Arguments json.RawMessage `json:"arguments"`
 		}
 		json.Unmarshal(req.Params, &p)
+		if run := s.triageOf(r.PathValue("job")); run != nil {
+			text, err := s.triageTool(run, r.PathValue("agent"), p.Name, p.Arguments)
+			if err != nil {
+				reply(toolResult(err.Error(), true))
+				return
+			}
+			reply(toolResult(text, false))
+			return
+		}
 		if ps := s.passOf(r.PathValue("job")); ps != nil {
 			if text, handled, err := s.opsTool(r.PathValue("job"), r.PathValue("agent"), p.Name, p.Arguments); handled {
 				if err != nil {

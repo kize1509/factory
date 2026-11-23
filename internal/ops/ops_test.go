@@ -555,3 +555,51 @@ func TestSearchWithoutAQueryListsTheProject(t *testing.T) {
 		}
 	}
 }
+
+// The board's own agent runs the whole board at Fix: it may move tickets
+// the factory didn't make. Below Fix, and for anyone else, those moves are
+// still drafts, and other agents still can't use the tracker tools.
+func TestBoardAgentRunsTheWholeBoard(t *testing.T) {
+	s, yt, _, _ := setup(t, "fix")
+	bare := t.TempDir()
+	sc := s.RegisterBoard("triage-T1", bare, "HF", "fix", "pericles")
+	if !sc.Enabled() || sc.Tracker.Project != "HF" || sc.Level != "fix" {
+		t.Fatalf("scope %+v", sc.Tracker)
+	}
+	if _, err := s.Tool("triage-T1", "pericles", "tracker_move", []byte(`{"id":"HF-7","state":"Done"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if c := yt.cmds(); len(c) != 1 || c[0] != "HF-7: State Done" {
+		t.Fatalf("commands %v", c)
+	}
+	if msg, err := s.Write(sc, Hermes, Action{Kind: "move", Issue: "HF-8", Fields: map[string]string{"State": "Done"}}); err != nil || !strings.Contains(msg, "draft") {
+		t.Fatalf("Hermes in a board scope still drafts foreign moves: %q %v", msg, err)
+	}
+	if _, err := s.Tool("triage-T1", "archimedes", "tracker_move", []byte(`{"id":"HF-7","state":"Done"}`)); err == nil {
+		t.Fatal("only the board's agent gets the tracker tools")
+	}
+
+	low := s.RegisterBoard("triage-T2", bare, "HF", "file", "pericles")
+	if msg, err := s.Tool("triage-T2", "pericles", "tracker_move", []byte(`{"id":"HF-7","state":"To do"}`)); err != nil || !strings.Contains(msg, "draft") {
+		t.Fatalf("at File a move is a draft: %q %v", msg, err)
+	}
+	if _, err := s.Tool("triage-T2", "pericles", "tracker_move", []byte(`{"id":"OTHER-1","state":"Done"}`)); err == nil {
+		t.Fatal("other projects stay out of reach")
+	}
+	_ = low
+}
+
+// A draft from a repo without a tracker block can still be approved after
+// its scope is gone (a restart): the draft names its project.
+func TestApproveDraftWithoutTrackerBlock(t *testing.T) {
+	s, yt, _, _ := setup(t, "fix")
+	bare := t.TempDir()
+	id, _ := s.Store.AddDraft(store.Draft{Repo: bare, Job: "triage-gone", Agent: "pericles", Action: "move",
+		Args: []byte(`{"kind":"move","issue":"HF-7","fields":{"State":"Done"}}`), Summary: "Move HF-7 to Done"})
+	if _, err := s.Approve(id); err != nil {
+		t.Fatal(err)
+	}
+	if c := yt.cmds(); len(c) != 1 || c[0] != "HF-7: State Done" {
+		t.Fatalf("commands %v", c)
+	}
+}
