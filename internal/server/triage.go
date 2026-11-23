@@ -138,11 +138,13 @@ func (s *Server) beginTriage(b triageOpts) (*triage.Run, int, error) {
 	if err != nil {
 		return nil, http.StatusBadRequest, err
 	}
-	tr, project, err := boardProject(repo, b.Project)
+	_, project, err := boardProject(repo, b.Project)
 	if err != nil {
 		return nil, http.StatusBadRequest, err
 	}
-	level := tr.Level
+	// he runs the board: comments, new tickets, fields and states. The API
+	// still takes a lower level for anyone who wants one.
+	level := "fix"
 	if b.Level != "" {
 		if level = config.ValidLevel(b.Level); level == "" {
 			return nil, http.StatusBadRequest, fmt.Errorf("level is observe, propose, file or fix")

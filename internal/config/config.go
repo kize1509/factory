@@ -136,7 +136,7 @@ type Engine struct {
 type TriageAuto struct {
 	On      bool    `json:"on"`
 	Project string  `json:"project,omitempty"` // the YouTrack project, when factory.yml has none
-	Level   string  `json:"level,omitempty"`   // default the tracker's level
+	Level   string  `json:"level,omitempty"`   // default fix
 	MaxJobs int     `json:"max_jobs"`          // jobs a run may start
 	Minutes float64 `json:"minutes,omitempty"` // how long a run may take; default 30
 	Gap     int     `json:"gap_minutes"`       // least time between two runs; default 60
