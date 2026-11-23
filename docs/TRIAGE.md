@@ -4,31 +4,36 @@ A triage run is the product agent, Pericles (role `product`), going over one rep
 
 Per D2 the agent decides and the engine executes. Tracker writes go through the operations service's guard, the same one Hermes uses. The engine starts the jobs and holds the run's limits.
 
-## Starting one
+## The Board panel
 
-Open the map, press **🏛 Board** (or B) and pick a repository. **Run Pericles now** takes:
+Open the map, press **🏛 Board** (or B) and pick a repository. At the top you choose how he runs:
 
-- **YouTrack project**: the board's short name, like HF. It's filled in from the repo's `factory.yml` tracker block when there is one, else from its last run or its jobs' tickets.
-- **Jobs he may start**: 2 by default, up to 10. With 0 he only recommends.
-- **Time limit**: 30 minutes by default. The agent is stopped when it runs out.
-- **What he may change**: the control level, by default the tracker's level (Fix unless `factory.yml` says otherwise).
-- **Focus**: optional, what to look at first.
+- **When I say**: he goes over the board when you press **Run Pericles now**.
+- **On his own**: he also goes over it by himself when something happens on the board (see below). You can still run him by hand.
 
-Only one run goes over a board at a time. The panel lists each run with why it started, what he changed, the jobs he started (click one to open its city), what he recommended, the questions he asked and the tickets still waiting on the owner. Homer tells the story on the map as he works.
+**Run now** takes how many jobs he may start (Just suggest, 1, 2, 3 or 5; 2 by default), how long he gets (15 minutes to 2 hours, 30 by default) and an optional note on what to look at first. When the repo's `factory.yml` has no tracker block, the YouTrack project box next to the repo name says which board he works on. It's filled in from his last run or from the repo's jobs' tickets.
+
+He runs the board himself: comments, new tickets, fields and states on any ticket in the project. When a ticket is unclear he asks its owner in a comment and picks up the answer later. There's no level to choose in the panel. The API still takes `level` for anyone who wants a lower one (see the table below).
+
+Only one run goes over a board at a time. The panel lists each run with why it started, what he changed, the jobs he started (click one to open its city), what he suggested, the questions he asked and the tickets still waiting on the owner. Homer tells the story on the map as he works.
 
 ## Running on his own
 
-Off for every repository until you turn it on in the panel. You tick what makes him run:
+Off for every repository until you pick **On his own**. Then he wakes when:
 
-- **An owner answered one of his questions**: a comment from a person on a ticket he asked about, after he asked.
-- **Someone created or changed a ticket**: a ticket in the project updated after his last run started, later than the factory's own last write to it. The factory's moves and comments don't count.
-- **His jobs are done and he left ready tickets**: his last run started as many jobs as it could, still listed ready tickets, and no job is going in the repo now.
+- an owner answers one of his questions: a comment from a person on a ticket he asked about, after he asked;
+- someone creates or changes a ticket: a ticket in the project updated after his last run started, later than the factory's own last write to it. The factory's moves and comments don't count;
+- his jobs finish and ready tickets are left: his last run started as many jobs as it could, still listed ready tickets, and no job is going in the repo now.
 
-The engine looks every 5 minutes. A run starts only when one of the ticked things happened, no run is going, at least the gap (60 minutes by default) has passed since the last run ended, and fewer than the daily limit (6 by default) automatic runs started today. The first look after you turn it on starts a run if he has never run on that repo. The panel shows what the last look decided. The settings are kept per repo under `triage` in `~/.factory/settings.json`; Admin's own saves leave them alone.
+You pick how often at most (every 30 minutes to every 6 hours, 1 hour by default), how many runs a day at most (6 by default) and how many jobs each run may start. Changes save as you click.
+
+The engine looks every 5 minutes. A run starts only when one of those things happened, no run is going, the gap has passed since the last run ended, and the daily limit isn't reached. The first look after you turn it on starts a run if he has never run on that repo. The panel shows what the last look decided. The settings are kept per repo under `triage` in `~/.factory/settings.json`; Admin's own saves leave them alone. Through the API you can still pick the triggers one by one (`on_board`, `on_ready`); owner answers always count.
 
 The API behind the panel: `GET /api/triage/boards`, `PUT /api/triage/auto`, `POST /api/triage`, `GET /api/triage?repo=`, `GET /api/triage/{id}` and `POST /api/triage/{id}/stop`. Runs are kept in `~/.factory/triage/<id>/run.json` and come back after a restart; a run that was going when the engine stopped is marked stopped.
 
 ## What the levels allow
+
+Runs use Fix unless the API call names another level.
 
 | Level | Comments and new tickets | Fields and states |
 |---|---|---|
@@ -41,7 +46,7 @@ At Fix the product agent may change fields and states on tickets the factory did
 
 ## Tools
 
-The agent can read the repo (`read`, `grep`, `find`, `ls`) and has no shell. Its tools:
+The agent can read the repo (`read`, `grep`, `find`, `ls`) and has no shell. It gets the same tools on every runtime: Claude and Codex reach them over MCP, pi through `/api/tools/triage-<id>/…`. Its tools:
 
 - `tracker_search`, `tracker_read`, `tracker_create`, `tracker_update`, `tracker_move`, `tracker_comment`, `tracker_link`, `tracker_attach` and `knowledge_search`, served by the operations service for the run's scope `triage-<id>`.
 - `ask_owner(issue, question)` posts `[factory] Question for the owner: …` on the ticket. The owner answers there, and a later run reads the answer in the comments. At Observe the comment is refused and the question stays in the run's report.

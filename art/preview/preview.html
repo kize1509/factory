@@ -76,28 +76,59 @@
   #m-board .boards button.on { border-color:var(--accent); background:color-mix(in srgb, var(--accent) 8%, var(--card)); color:var(--fg) }
   #m-board .boards button small { color:var(--soft); font-size:11.5px }
   #m-board .pane { display:grid; gap:14px; min-width:0 }
-  #m-board .intro { margin:0; font-size:13.5px; line-height:1.5 }
-  #m-board section { border:2px solid var(--line); border-radius:6px; padding:12px 14px; display:grid; gap:10px }
-  #m-board section > h3 { margin:0; font:12px Silkscreen, monospace; color:var(--accent); font-weight:400 }
+  #m-board .head { display:flex; gap:12px; align-items:center; flex-wrap:wrap }
+  #m-board .head h2 { margin:0; font:15px Silkscreen, monospace; color:var(--fg); font-weight:400 }
+  #m-board .head .proj { display:flex; gap:6px; align-items:center; font-size:12.5px; color:var(--soft) }
+  #m-board .head .proj input { width:78px; padding:4px 8px; font:13px "JetBrains Mono", monospace; text-transform:uppercase }
+  #m-board .head .proj code { font:13px "JetBrains Mono", monospace; color:var(--fg); background:var(--bg); border:1px solid var(--line); padding:2px 6px; border-radius:3px }
+  #m-board .state { margin-left:auto; display:flex; gap:6px; align-items:center; font-size:12.5px; color:var(--soft) }
+  #m-board .dot { width:9px; height:9px; border-radius:50%; background:var(--line); flex:none; display:inline-block }
+  #m-board .dot.running { background:var(--think); animation:askpulse 1.4s ease-in-out infinite } #m-board .dot.done { background:var(--ok) }
+  #m-board .dot.failed { background:var(--fail) } #m-board .dot.auto { background:var(--gold) }
+  #m-board .intro { margin:0; font-size:13.5px; line-height:1.5; color:var(--soft) }
+  #m-board .intro b { color:var(--fg) }
+  #m-board .modes { display:grid; grid-template-columns:1fr 1fr; gap:10px }
+  #m-board .modes button { text-align:left; display:grid; gap:4px; padding:12px 14px; border:2px solid var(--line); border-radius:8px; background:var(--card); color:var(--fg); font:13px Inter, sans-serif; text-transform:none; letter-spacing:0 }
+  #m-board .modes button b { font:12px Silkscreen, monospace; font-weight:400; display:flex; align-items:center; gap:8px }
+  #m-board .modes button span { color:var(--soft); font-size:12.5px; line-height:1.4 }
+  #m-board .modes button b i { width:14px; height:14px; border-radius:50%; border:2px solid var(--line); flex:none; display:inline-block }
+  #m-board .modes button.on { border-color:var(--accent); background:color-mix(in srgb, var(--accent) 7%, var(--card)) }
+  #m-board .modes button.on b i { border-color:var(--accent); background:radial-gradient(var(--accent) 45%, transparent 50%) }
+  #m-board section { border:2px solid var(--line); border-radius:8px; padding:14px 16px; display:grid; gap:12px }
+  #m-board section > h3 { margin:0; font:12px Silkscreen, monospace; color:var(--accent); font-weight:400; display:flex; align-items:center; gap:8px }
+  #m-board section > h3 small { margin-left:auto; font:12px Inter, sans-serif; color:var(--soft) }
   #m-board section > p { margin:0; color:var(--soft); font-size:12.5px; line-height:1.45 }
-  #m-board .row3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px }
-  #m-board .check { display:flex; flex-direction:row; gap:8px; align-items:flex-start }
-  #m-board .check input { width:auto; flex:none; margin:3px 0 0; padding:0 }
+  #m-board .opt { display:grid; grid-template-columns:150px 1fr; gap:10px; align-items:center }
+  #m-board .opt > span { font-size:13px; color:var(--fg); font-weight:600 }
+  #m-board .opt > span small { display:block; font-weight:400; color:var(--soft); font-size:11.5px }
+  #m-board .seg { display:inline-flex; flex-wrap:wrap; border:2px solid var(--line); border-radius:6px; overflow:hidden; justify-self:start }
+  #m-board .seg button { border:0; border-radius:0; border-right:1px solid var(--line); padding:6px 12px; font:12.5px Inter, sans-serif; text-transform:none; letter-spacing:0; background:var(--card); color:var(--fg); min-width:44px }
+  #m-board .seg button:last-child { border-right:0 }
+  #m-board .seg button:hover { background:var(--bg) }
+  #m-board .seg button.on { background:var(--accent); color:var(--accent-fg) }
+  #m-board .focus { width:100%; font:13.5px Inter, sans-serif; color:var(--fg); background:var(--bg); border:2px solid var(--line); border-radius:6px; padding:8px 10px }
+  #m-board .focus:focus { outline:none; border-color:var(--accent) }
   #m-board .acts { display:flex; gap:10px; align-items:center; flex-wrap:wrap }
-  #m-board .acts .msg { font-size:12.5px; color:var(--soft) } #m-board .acts .msg.bad { color:var(--fail) }
-  #m-board .run { border:1px solid var(--line); border-radius:6px; padding:10px 12px; display:grid; gap:6px; font-size:13px }
+  #m-board .acts .primary { padding:9px 18px }
+  #m-board .msg { font-size:12.5px; color:var(--soft) } #m-board .msg.bad { color:var(--fail) } #m-board .msg.good { color:var(--ok) }
+  #m-board .wakes { margin:0; padding:0; list-style:none; display:grid; gap:4px; font-size:12.5px; color:var(--soft) }
+  #m-board .wakes li::before { content:'↻ '; color:var(--accent) }
+  #m-board .run { border:1px solid var(--line); border-left:4px solid var(--line); border-radius:6px; padding:10px 12px; display:grid; gap:6px; font-size:13px; line-height:1.45 }
+  #m-board .run.running { border-left-color:var(--think) } #m-board .run.done { border-left-color:var(--ok) } #m-board .run.failed { border-left-color:var(--fail) }
   #m-board .run .top { display:flex; gap:8px; align-items:center; flex-wrap:wrap }
+  #m-board .run .top b { font-size:13px }
   #m-board .run .top small { color:var(--soft) }
-  #m-board .run .top button { margin-left:auto }
+  #m-board .run .top button { margin-left:auto; padding:3px 10px }
+  #m-board .run .tags { display:flex; gap:6px; flex-wrap:wrap }
+  #m-board .run .tags span { font-size:11.5px; color:var(--soft); background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:1px 8px }
   #m-board .run ul { margin:0; padding-left:18px; display:grid; gap:3px }
-  #m-board .run .lbl { font:11px Silkscreen, monospace; color:var(--soft) }
-  #m-board .run .err { color:var(--fail) }
-  #m-board .pill { font:11px Silkscreen, monospace; padding:2px 6px; border-radius:3px; border:1px solid currentColor }
-  #m-board .pill.running { color:var(--think) } #m-board .pill.done { color:var(--ok) } #m-board .pill.failed { color:var(--fail) } #m-board .pill.stopped { color:var(--soft) }
+  #m-board .run .lbl { font:10px Silkscreen, monospace; color:var(--soft); margin-top:2px }
+  #m-board .run .err { color:var(--fail); background:color-mix(in srgb, var(--fail) 8%, var(--card)); border-radius:4px; padding:6px 8px; font-size:12.5px }
+  #m-board .run a { color:var(--accent) }
   #m-board .note { font-size:12px; color:var(--soft) }
-  #m-board .empty { color:var(--soft); font-size:13px }
+  #m-board .empty { color:var(--soft); font-size:13px; margin:0 }
   #board.working::after { content:' · working'; color:var(--think) }
-  @media (max-width: 760px) { #m-board .mb { grid-template-columns:1fr } #m-board .boards { position:static } #m-board .row3 { grid-template-columns:1fr } }
+  @media (max-width: 760px) { #m-board .mb { grid-template-columns:1fr } #m-board .boards { position:static } #m-board .modes { grid-template-columns:1fr } #m-board .opt { grid-template-columns:1fr; gap:6px } }
   .modal .err { color:var(--fail); font-size:13px }
   @media (max-width: 560px) { .modal .row2 { grid-template-columns:1fr } }
   .fsb { border:2px solid var(--line); border-radius:4px; overflow:hidden; display:grid }
@@ -136,6 +167,12 @@
   .hud .chips button { font-size:11px; padding:4px 7px }
   .hud .chips button.askchip { border-color:var(--warn); color:var(--fg); background:color-mix(in srgb, var(--warn) 35%, var(--card)); animation:askpulse 1.4s ease-in-out infinite }
   .hud .chips button small { font:10px Inter, sans-serif; opacity:.8; margin-left:4px }
+  .hud .chips .cchip { display:inline-flex; align-items:center; gap:5px }
+  .hud .chips .cchip i { width:7px; height:7px; border-radius:50%; background:var(--line); flex:none }
+  .hud .chips .k-go i { background:var(--think) } .hud .chips .k-ask i { background:var(--warn) } .hud .chips .k-done i { background:var(--ok) }
+  .hud .chips .k-fail i { background:var(--fail) } .hud .chips .k-off i { background:var(--soft) }
+  .hud .chips .k-done, .hud .chips .k-off { color:var(--soft) }
+  .hud .chips .more { border-style:dashed; color:var(--soft) }
   .hud .chips button.fold { margin-left:auto }
   .hud.min .chips { margin-bottom:0 }
   .hud.min .track, .hud.min .line { display:none }
@@ -177,7 +214,7 @@
   .citycard .bar i.done { background:var(--ok) } .citycard .bar i.now { background:var(--gold) }
   #c, #ov { transition:opacity .22s ease }
   #stage.fade #c, #stage.fade #ov { opacity:0 }
-  .legend { position:absolute; left:12px; top:calc(var(--top, 56px) + var(--hud, 100px) + 18px); bottom:calc(var(--bottom, 80px) + 12px); width:330px; max-width:calc(100% - 24px); background:var(--card); border:2px solid var(--line);
+  .legend { position:absolute; left:12px; top:calc(var(--top, 56px) + var(--hud, 100px) + 18px); bottom:calc(var(--bottom, 80px) + 84px); width:310px; max-width:calc(100% - 24px); background:var(--card); border:2px solid var(--line);
             border-radius:3px; display:flex; flex-direction:column; overflow:hidden; cursor:default; z-index:4; box-shadow:8px 0 24px rgba(20,33,61,.15);
             transform:translateX(calc(-100% - 30px)); opacity:0; visibility:hidden;
             transition:transform .38s cubic-bezier(.2,.8,.2,1), opacity .25s ease, visibility 0s linear .38s }
@@ -196,16 +233,20 @@
   .pop .note .late { margin-top:6px; padding:4px 6px; background:color-mix(in srgb, var(--warn) 25%, var(--card)); border-radius:3px; font:12px Inter, sans-serif }
   .pop a { color:var(--accent) }
   .pop .x { position:absolute; right:6px; top:6px; border:0; background:none; padding:2px 4px; font-size:12px }
-  .legend nav { display:flex; gap:4px; padding:8px; border-bottom:2px solid var(--line) }
-  .legend nav button { flex:1 }
-  .legend nav button.hide { flex:0 0 auto; padding:5px 8px }
-  .legend .list { overflow-y:auto; padding:6px 8px 10px }
-  .legend .item { display:flex; gap:10px; align-items:center; padding:6px; border-radius:3px; cursor:pointer }
+  .legend nav { display:flex; align-items:center; gap:8px; padding:8px 10px; border-bottom:2px solid var(--line) }
+  .legend nav .tabs { display:flex; flex:1; border:2px solid var(--line); border-radius:6px; overflow:hidden }
+  .legend nav .tabs button { flex:1; border:0; border-radius:0; border-right:1px solid var(--line); padding:5px 4px; font-size:10px }
+  .legend nav .tabs button:last-child { border-right:0 }
+  .legend nav .tabs button.on { background:var(--accent); color:var(--accent-fg) }
+  .legend nav button.hide { flex:0 0 auto; border:0; background:none; padding:4px 6px; font-size:16px; line-height:1; color:var(--soft) }
+  .legend .list { overflow-y:auto; padding:4px 6px 10px }
+  .legend .item { display:grid; grid-template-columns:52px 1fr; gap:10px; align-items:center; padding:6px; border-radius:6px; cursor:pointer }
   .legend .item:hover { background:var(--bg) }
-  .legend .item .thumb { width:72px; height:64px; flex-shrink:0; display:flex; align-items:center; justify-content:center; overflow:hidden }
+  .legend .item .thumb { width:52px; height:46px; display:flex; align-items:center; justify-content:center; overflow:hidden; background:var(--bg); border-radius:6px }
   .legend .item canvas { image-rendering:pixelated }
-  .legend .item b { font:11px Silkscreen, monospace; display:block }
-  .legend .item span { font-size:12.5px; color:var(--soft) }
+  .legend .item b { font:10.5px Silkscreen, monospace; display:flex; gap:6px; align-items:center; margin-bottom:1px }
+  .legend .item b em { font-style:normal; font:9px Silkscreen, monospace; background:var(--accent); color:var(--accent-fg); border-radius:3px; padding:1px 4px }
+  .legend .item span { font-size:12px; line-height:1.35; color:var(--soft) }
   .procs, .chron { width:520px; bottom:calc(var(--bottom, 80px) + 84px) } /* clear of Homer in the corner */
   .legend .sum { padding:8px 12px; font-size:12.5px; border-bottom:2px solid var(--line); display:flex; gap:12px; flex-wrap:wrap; align-items:center }
   .legend .sum b { font:11px Silkscreen, monospace }
@@ -247,7 +288,7 @@
   .chron .entry .more { border:0; background:none; padding:2px 0 0; font:10px Silkscreen, monospace; color:var(--accent); cursor:pointer }
   .chron code, #thoughts code { font:12px "JetBrains Mono", monospace; background:var(--bg); padding:0 4px; border-radius:2px }
   .chron a { color:var(--accent) }
-  .legend .group { font:10px Silkscreen, monospace; color:var(--accent); margin:10px 6px 2px }
+  .legend .group { font:10px Silkscreen, monospace; color:var(--soft); margin:10px 6px 2px; padding-bottom:4px; border-bottom:1px solid var(--line) }
   .zoom { position:absolute; right:12px; transition:right .38s cubic-bezier(.2,.8,.2,1); bottom:calc(var(--bottom, 80px) + 12px); display:flex; gap:4px; z-index:5 }
   .zoom button { width:34px; padding:5px 0 }
   .zoom button.wide { width:auto; padding:5px 8px }
@@ -1226,7 +1267,7 @@ function aegeanLine() {
   const waiting = js.filter(needsYou).length;
   if (!js.length) return '<div class="line"><b>The Aegean</b> · No jobs yet. Each job you start becomes a city here.</div>';
   return `<div class="line"><b>The Aegean</b> · ${projects} ${projects === 1 ? 'project' : 'projects'} as countries, ${js.length} ${js.length === 1 ? 'job' : 'jobs'} as cities: ${working} working${waiting ? `, <b>${waiting} ${waiting === 1 ? 'needs' : 'need'} you</b>` : ''}. Click a city to go in.</div>
-    <div class="line key">A gold ring around a city: the job waits for you. A boat sailing out: the job just shipped its commit, push or PR.</div>`;
+    <div class="line key">A gold ring around a city: the job waits for you. A boat sailing out: the job just shipped its commit, push or PR. Dots on the tabs: blue working, amber needs you, green done, red failed, grey stopped.</div>`;
 }
 function stepBar(k, cls) {
   const at = AT[k] ?? SETUPS[k]?.at, ix = STEPS.findIndex(s => s[0] === at), finished = k === 'idle' && JOBS.find(j => jobSetup(j) === k && j.i > 0);
@@ -1234,9 +1275,18 @@ function stepBar(k, cls) {
 }
 // the top panel starts as just the row of cities; ▾ shows the details
 function hudMin() { try { return localStorage.getItem('hud') !== '1'; } catch { return true; } }
+let hudAll = false; // the top panel shows every city, finished ones too
 function hud() {
   const nf = typeof found === 'undefined' ? 0 : found.size, nl = typeof LANDMARKS === 'undefined' ? 5 : LANDMARKS.length;
-  const chips = JOBS.map((j, i) => `<button data-j="${i}" class="${mode === 'city' && j === cur ? 'on' : ''}${needsYou(j) ? ' askchip' : ''}">${j.city}<small>${needsYou(j) ? 'needs you' : SETUPS[jobSetup(j)].label}</small></button>`).join('');
+  // the cities that need you or are working come first; finished and
+  // stopped ones fold behind "+N more" until you open them
+  const kind = j => needsYou(j) ? 'ask' : !j.live ? 'go' : ({ done:'done', cancelled:'off', interrupted:'off', failed:'fail' })[j.live.state] || 'go';
+  const said = { ask:'needs you', done:'done', off:'stopped', fail:'failed' };
+  const rank = { ask:0, go:1, fail:2, off:3, done:4 };
+  const list = JOBS.map((j, i) => ({ j, i, k:kind(j) })).sort((a, b) => rank[a.k] - rank[b.k] || a.i - b.i);
+  const shown = list.filter(x => hudAll || x.k === 'ask' || x.k === 'go' || (mode === 'city' && x.j === cur)), hidden = list.length - shown.length;
+  const chips = shown.map(({ j, i, k }) => `<button data-j="${i}" class="cchip k-${k}${mode === 'city' && j === cur ? ' on' : ''}${k === 'ask' ? ' askchip' : ''}" title="${escHTML(j.id + ' · ' + (said[k] || SETUPS[jobSetup(j)].label))}"><i></i>${j.city}${k === 'ask' || k === 'go' ? `<small>${k === 'ask' ? 'needs you' : SETUPS[jobSetup(j)].label}</small>` : ''}</button>`).join('')
+    + (hidden ? `<button class="more" title="Show the finished and stopped cities">+${hidden} more</button>` : hudAll && list.some(x => x.k !== 'ask' && x.k !== 'go') ? '<button class="more" title="Hide the finished and stopped cities">Fewer</button>' : '');
   const h = document.getElementById('hud');
   const body = mode === 'aegean'
     ? aegeanLine()
@@ -1245,6 +1295,7 @@ function hud() {
   h.classList.toggle('min', min);
   h.innerHTML = `<div class="chips"><button data-j="map" class="${mode === 'aegean' ? 'on' : ''}">Aegean</button>${chips}${mode === 'city' && canStop(cur) ? `<button class="stopjob" title="Stop ${escHTML(cur.id)} for good">Stop job</button>` : ''}${mode === 'city' && canDelete(cur) ? `<button class="deljob" title="Delete ${escHTML(cur.id)} and its island">Delete job</button>` : ''}<button class="fold" title="${min ? 'Show details' : 'Hide details'}">${min ? '▾' : '▴'}</button></div>${body}`;
   h.querySelectorAll('[data-j]').forEach(b => b.onclick = () => b.dataset.j === 'map' ? showAegean() : enterCity(JOBS[+b.dataset.j]));
+  const more = h.querySelector('.more'); if (more) more.onclick = () => { hudAll = !hudAll; hud(); };
   h.querySelector('.fold').onclick = () => { try { localStorage.setItem('hud', min ? '1' : '0'); } catch {} hud(); };
   const sb = h.querySelector('.stopjob'); if (sb) sb.onclick = () => stopJob(cur);
   const db = h.querySelector('.deljob'); if (db) db.onclick = () => deleteJob(cur);
@@ -1482,25 +1533,26 @@ function thumb(id, st, size) {
 }
 function legend() {
   const box = document.getElementById('legend');
-  box.innerHTML = `<nav>${['places', 'people', 'signs'].map(t => `<button data-t="${t}" class="${t === legendTab ? 'on' : ''}">${t}</button>`).join('')}<button class="hide" title="Hide legend (Esc)">Hide</button></nav><div class="list"></div>`;
+  box.innerHTML = `<nav><div class="tabs">${['places', 'people', 'signs'].map(t => `<button data-t="${t}" class="${t === legendTab ? 'on' : ''}">${t}</button>`).join('')}</div><button class="hide" title="Hide legend (Esc)" aria-label="Hide legend">✕</button></nav><div class="list"></div>`;
   box.querySelectorAll('nav button[data-t]').forEach(b => b.onclick = () => { legendTab = b.dataset.t; legend(); });
   box.querySelector('.hide').onclick = () => setLegend(false);
   const list = box.querySelector('.list');
-  const item = (canvas, title, text, onclick) => { const d = document.createElement('div'); d.className = 'item'; const t = document.createElement('div'); t.className = 'thumb'; t.appendChild(canvas); d.appendChild(t);
+  const item = (canvas, title, text, onclick, tag) => { const d = document.createElement('div'); d.className = 'item'; const t = document.createElement('div'); t.className = 'thumb'; t.appendChild(canvas); d.appendChild(t);
     d.insertAdjacentHTML('beforeend', `<div><b></b><span></span></div>`); d.querySelector('b').textContent = title; d.querySelector('span').textContent = text;
+    if (tag) { const e = document.createElement('em'); e.textContent = tag; d.querySelector('b').prepend(e); }
     if (onclick) d.onclick = onclick; list.appendChild(d); return d; };
   if (legendTab === 'places') {
     list.insertAdjacentHTML('beforeend', '<div class="group">Where the work happens</div>');
     // in the order the work passes them, then the places off the road
     const order = p => p.step ? parseFloat(p.step) + (p.step.endsWith('b') ? 0.5 : 0) : 99;
     for (const p of A.layout.filter(q => q.kind === 'work').sort((a, b) => order(a) - order(b))) {
-      const d = item(thumb(p.asset, 'active', 64), (p.step ? p.step + '  ' : '') + p.name, A.placeAbout[p.id], () => lookAt(p));
+      const d = item(thumb(p.asset, 'active', 46), p.name, (A.placeAbout[p.id] || '').replace(/^Step \w+[.,]\s*(.)/, (_, c) => c.toUpperCase()), () => lookAt(p), p.step ? p.step : '');
       d.onmouseenter = () => legendFocus = p.id; d.onmouseleave = () => legendFocus = null;
     }
     list.insertAdjacentHTML('beforeend', `<div class="group">Discoveries, ${found.size} of ${LANDMARKS.length} found</div>`);
     for (const p of LANDMARKS) {
-      if (found.has(p.id)) { const d = item(thumb(p.asset, 'idle', 64), p.name, A.placeAbout[p.id], () => lookAt(p)); d.onmouseenter = () => legendFocus = p.id; d.onmouseleave = () => legendFocus = null; }
-      else { const cv = thumb(p.asset, 'idle', 64); cv.style.filter = 'brightness(0) opacity(.25)'; item(cv, '???', 'Not found yet. Explore the map and click what you find.'); }
+      if (found.has(p.id)) { const d = item(thumb(p.asset, 'idle', 46), p.name, A.placeAbout[p.id], () => lookAt(p)); d.onmouseenter = () => legendFocus = p.id; d.onmouseleave = () => legendFocus = null; }
+      else { const cv = thumb(p.asset, 'idle', 46); cv.style.filter = 'brightness(0) opacity(.25)'; item(cv, '???', 'Not found yet. Explore the map and click what you find.'); }
     }
   }
   if (legendTab === 'people') {
@@ -1508,11 +1560,11 @@ function legend() {
     for (const r of roles) {
       list.insertAdjacentHTML('beforeend', `<div class="group">${r}s</div>`);
       for (const p of A.philosophers.filter(q => q.Role === r))
-        item(thumb('portrait/' + p.ID, 'idle', 48), p.Name, A.peopleAbout[p.ID] + (agents[p.ID] && !agents[p.ID].leaving ? ' Working now.' : ''),
+        item(thumb('portrait/' + p.ID, 'idle', 44), p.Name, A.peopleAbout[p.ID] + (agents[p.ID] && !agents[p.ID].leaving ? ' Working now.' : ''),
           () => { if (agents[p.ID] && !agents[p.ID].leaving) { lookAt(agents[p.ID]); openDrawer(p.ID); } });
     }
   }
-  if (legendTab === 'signs') for (const [id, t, d] of SIGNS) item(thumb(id, 'idle', 44), t, d);
+  if (legendTab === 'signs') for (const [id, t, d] of SIGNS) item(thumb(id, 'idle', 40), t, d);
 }
 function lookAt(o) {
   const a = o.asset ? A.assets[o.asset] : { w:0, h:0 }, x = (o.tx ?? o.x + a.w / 2), y = (o.ty ?? o.y + a.h / 2);
@@ -2113,11 +2165,6 @@ document.getElementById('ntf').onsubmit = async ev => {
 // You pick a repo, run him now, or let him run on his own when something
 // happens on the board. The engine holds every limit (docs/TRIAGE.md).
 const BOARD = { sel:null, boards:[], yt:{}, runs:[], timer:null, drawn:null };
-const LEVEL_SAID = {
-  observe:'Observe: he reads the board and changes nothing. You get his report.',
-  propose:'Propose: every change he wants waits in Admin → Review queue for you to approve.',
-  file:'File: his comments and new tickets go out; field and state changes wait for you.',
-  fix:'Fix: he runs the board himself: comments, new tickets, fields and states on any ticket in the project.' };
 const boardOpen = () => document.getElementById('m-board').classList.contains('open');
 const ticketLink = id => BOARD.yt.url ? `<a href="${escHTML(BOARD.yt.url.replace(/\/+$/, ''))}/issue/${encodeURIComponent(id)}" target="_blank" rel="noopener">${escHTML(id)}</a>` : escHTML(id);
 const runAgo = t => { const s = (Date.now() - Date.parse(t)) / 1000; return !isFinite(s) ? '' : s < 90 ? 'just now' : s < 5400 ? Math.round(s / 60) + ' min ago' : s < 129600 ? Math.round(s / 3600) + ' h ago' : new Date(t).toLocaleDateString(); };
@@ -2143,7 +2190,7 @@ function boardBadge() { document.getElementById('board').classList.toggle('worki
 function boardDraw() {
   const list = document.getElementById('bd-list'), pane = document.getElementById('bd-pane');
   list.innerHTML = '<small>Repositories</small>' + (BOARD.boards.length ? BOARD.boards.map(b => `<button type="button" data-repo="${escHTML(b.repo)}" class="${b.repo === BOARD.sel ? 'on' : ''}" title="${escHTML(b.repo)}">
-      <span>${escHTML(PROJECTS[b.repo] || b.name)}</span><small>${b.project ? escHTML(b.project) + ' · ' : ''}${b.running ? 'Pericles is working' : b.auto.on ? 'runs on his own' : 'runs when you say'}</small></button>`).join('')
+      <span>${escHTML(PROJECTS[b.repo] || b.name)}</span><small>${b.project ? escHTML(b.project) + ' · ' : ''}${b.running ? 'working now' : b.auto.on ? 'on his own' : 'when you say'}</small></button>`).join('')
     : '<p class="empty">No repositories yet. Start a job with New task first; its repository shows up here.</p>');
   list.querySelectorAll('[data-repo]').forEach(btn => btn.onclick = () => { BOARD.sel = btn.dataset.repo; try { localStorage.setItem('board', BOARD.sel); } catch {} BOARD.drawn = null; boardLoad(); });
   const b = BOARD.boards.find(q => q.repo === BOARD.sel);
@@ -2151,88 +2198,105 @@ function boardDraw() {
   // the forms are drawn once per repo, so a refresh never eats what you type
   if (BOARD.drawn !== b.repo) { BOARD.drawn = b.repo; pane.innerHTML = boardForms(b); boardWire(b); }
   boardStatus(b);
-  document.getElementById('bd-runs').innerHTML = BOARD.runs.length ? BOARD.runs.map(runCard).join('') : '<p class="empty">No runs yet. Run him now, or turn on the schedule above.</p>';
+  document.getElementById('bd-runs').innerHTML = BOARD.runs.length ? BOARD.runs.map(runCard).join('') : '<p class="empty">No runs yet. Press Run Pericles now, or let him run on his own.</p>';
   document.querySelectorAll('#bd-runs [data-stop]').forEach(x => x.onclick = async () => { x.disabled = true; await fetch(`/api/triage/${x.dataset.stop}/stop`, { method:'POST' }); boardLoad(); });
   document.querySelectorAll('#bd-runs [data-job]').forEach(x => x.onclick = ev => { ev.preventDefault(); const j = JOBS.find(q => q.id === x.dataset.job); if (j) { closeModal('m-board'); enterCity(j); } });
 }
-const levelOptions = (sel, dflt) => `<option value="">The project's level (${escHTML(dflt || 'fix')})</option>` + Object.keys(LEVEL_SAID).map(l => `<option value="${l}"${l === sel ? ' selected' : ''}>${l[0].toUpperCase() + l.slice(1)}</option>`).join('');
+// a row of choices, one picked; chosen values that aren't in the list are kept
+const mins = m => m < 60 ? m + ' min' : m % 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : m / 60 + ' h';
+const seg = (name, opts, v, label = String) => {
+  if (!opts.some(o => o[0] === v)) opts = [...opts, [v, label(v)]].sort((x, y) => x[0] - y[0]);
+  return `<div class="seg" data-seg="${name}">${opts.map(([val, label]) => `<button type="button" data-v="${val}" class="${val === v ? 'on' : ''}">${label}</button>`).join('')}</div>`;
+};
+const segVal = (root, name) => +root.querySelector(`[data-seg="${name}"] .on`).dataset.v;
+const JOB_OPTS = [[0, 'Just suggest'], [1, '1'], [2, '2'], [3, '3'], [5, '5']];
+const TIME_OPTS = [[15, '15 min'], [30, '30 min'], [60, '1 h'], [120, '2 h']];
+const GAP_OPTS = [[30, '30 min'], [60, '1 h'], [180, '3 h'], [360, '6 h']];
+const DAY_OPTS = [[3, '3'], [6, '6'], [12, '12'], [24, '24']];
 function boardForms(b) {
   const a = b.auto, ytOK = BOARD.yt.configured;
-  return `<p class="intro"><b>Pericles</b> reads the open tickets in <b>${escHTML(b.project || 'the YouTrack project')}</b> and the code behind them. He fills in missing fields, splits tickets that are too big, links duplicates, files tickets for broken things nobody wrote up, and asks the owner on the ticket when it can't be built as written. Then he starts jobs on the ready ones, highest priority first. Each job shows up as a city on the map.</p>
+  const proj = b.mapped ? `YouTrack <code>${escHTML(b.project)}</code>` : `YouTrack project <input id="bd-proj" value="${escHTML(b.project || '')}" placeholder="HF" autocomplete="off" title="The board's short name in YouTrack">`;
+  return `<div class="head"><h2>${escHTML(PROJECTS[b.repo] || b.name)}</h2><span class="proj">${proj}</span><span class="state" id="bd-state"></span></div>
+  <p class="intro"><b>Pericles</b> reads the open tickets and the code behind them, fixes up the tickets, files ones for broken things, and starts jobs on the ready ones. When a ticket is unclear he asks its owner in a comment and carries on when they answer.</p>
   ${ytOK ? '' : '<p class="intro" style="color:var(--fail)">YouTrack isn\'t set up yet. <a href="#" id="bd-yt">Set it up in Admin → Connections</a>, then come back.</p>'}
-  <section><h3>Run him now</h3>
-    <form id="bd-run" style="display:grid;gap:10px">
-      <div class="row3">
-        <label><b>YouTrack project</b>${b.mapped ? 'from factory.yml' : 'its short name'}<input name="project" value="${escHTML(b.project || '')}" placeholder="HF" ${b.mapped ? 'readonly' : ''} autocomplete="off" style="text-transform:uppercase;font-family:'JetBrains Mono', monospace"></label>
-        <label><b>Jobs he may start</b>0 means he only recommends<input name="jobs" type="number" min="0" max="10" value="2"></label>
-        <label><b>Time limit</b>minutes<input name="minutes" type="number" min="5" max="240" value="30"></label>
-      </div>
-      <label><b>What he may change</b><select name="level">${levelOptions('', b.level)}</select><span data-said></span></label>
-      <label><b>Focus</b> optional: what to look at first, in your words<textarea name="focus" rows="2" placeholder="e.g. the export bugs, or tickets tagged customer"></textarea></label>
-      <div class="acts"><button type="submit" class="primary" ${ytOK ? '' : 'disabled'}>Run Pericles now</button><span class="msg" data-msg></span></div>
-    </form>
+  <div class="modes" id="bd-modes">
+    <button type="button" data-mode="manual" class="${a.on ? '' : 'on'}"><b><i></i>When I say</b><span>He goes over the board when you press Run.</span></button>
+    <button type="button" data-mode="auto" class="${a.on ? 'on' : ''}"><b><i></i>On his own</b><span>He also goes over it by himself when something happens on the board.</span></button>
+  </div>
+  <section id="bd-auto" ${a.on ? '' : 'hidden'}><h3>On his own <small class="msg" data-msg></small></h3>
+    <ul class="wakes"><li>An owner answers one of his questions</li><li>Someone creates or changes a ticket</li><li>His jobs finish and ready tickets are left</li></ul>
+    <div class="opt"><span>At most every</span>${seg('gap', GAP_OPTS, a.gap_minutes, mins)}</div>
+    <div class="opt"><span>Runs a day<small>at most</small></span>${seg('day', DAY_OPTS, a.per_day)}</div>
+    <div class="opt"><span>Jobs per run</span>${seg('autojobs', JOB_OPTS, a.max_jobs || 0)}</div>
+    <div class="note" id="bd-last"></div>
   </section>
-  <section><h3>His runs</h3><div id="bd-runs" style="display:grid;gap:8px"></div></section>
-  <section><h3>Let him run on his own</h3>
-    <p>Off until you turn it on. When it's on, the engine looks every 5 minutes and starts a run only when one of the things you tick has happened since his last run. It never starts one while a run is going, waits at least the gap after the last one, and stops at the daily limit.</p>
-    <form id="bd-auto" style="display:grid;gap:10px">
-      <label class="check"><input type="checkbox" name="on" ${a.on ? 'checked' : ''}><span><b>Run on his own for this repository</b></span></label>
-      <label class="check"><input type="checkbox" name="on_answers" ${a.on_answers ? 'checked' : ''}><span><b>An owner answered one of his questions</b> on the ticket, so he can carry on with it.</span></label>
-      <label class="check"><input type="checkbox" name="on_board" ${a.on_board ? 'checked' : ''}><span><b>Someone created or changed a ticket</b> in the project. Changes the factory made itself don't count.</span></label>
-      <label class="check"><input type="checkbox" name="on_ready" ${a.on_ready ? 'checked' : ''}><span><b>His jobs are done and he left ready tickets</b> because he hit the job limit, so he can start the next ones.</span></label>
-      <div class="row3">
-        <label><b>Jobs per run</b>0 means he only recommends<input name="max_jobs" type="number" min="0" max="10" value="${a.max_jobs || 0}"></label>
-        <label><b>Gap</b>minutes between runs<input name="gap_minutes" type="number" min="10" max="1440" value="${a.gap_minutes}"></label>
-        <label><b>Daily limit</b>runs a day<input name="per_day" type="number" min="1" max="48" value="${a.per_day}"></label>
-      </div>
-      <label><b>What he may change</b><select name="level">${levelOptions(a.level, b.level)}</select><span data-said></span></label>
-      <div class="acts"><button type="submit">Save</button><span class="msg" data-msg></span></div>
-      <div class="note" id="bd-last"></div>
-    </form>
-  </section>`;
+  <section id="bd-run"><h3>Run now</h3>
+    <div class="opt"><span>Jobs he may start</span>${seg('jobs', JOB_OPTS, 2)}</div>
+    <div class="opt"><span>Time he gets</span>${seg('minutes', TIME_OPTS, 30)}</div>
+    <input class="focus" name="focus" placeholder="Anything to look at first? e.g. the export bugs (optional)" autocomplete="off">
+    <div class="acts"><button type="button" class="primary" id="bd-go" ${ytOK ? '' : 'disabled'}>Run Pericles now</button><span class="msg" data-msg></span></div>
+  </section>
+  <section><h3>His runs</h3><div id="bd-runs" style="display:grid;gap:8px"></div></section>`;
 }
 function boardWire(b) {
+  const pane = document.getElementById('bd-pane');
   const yt = document.getElementById('bd-yt'); if (yt) yt.onclick = ev => { ev.preventDefault(); closeModal('m-board'); openAdmin('connections'); };
-  for (const f of [document.getElementById('bd-run'), document.getElementById('bd-auto')]) {
-    const said = f.querySelector('[data-said]'), show = () => said.textContent = LEVEL_SAID[f.level.value || b.level || 'fix'];
-    f.level.onchange = show; show();
-  }
-  const run = document.getElementById('bd-run');
-  run.onsubmit = async ev => {
-    ev.preventDefault(); const msg = run.querySelector('[data-msg]'); msg.className = 'msg'; msg.textContent = 'Starting…';
-    const body = { repo:b.repo, project:run.project.value.trim().toUpperCase(), level:run.level.value, max_jobs:+run.jobs.value, minutes:+run.minutes.value, focus:run.focus.value.trim() };
+  const project = () => (document.getElementById('bd-proj')?.value || b.project || '').trim().toUpperCase();
+  const run = document.getElementById('bd-run'), auto = document.getElementById('bd-auto');
+  const autoOn = () => document.querySelector('#bd-modes [data-mode=auto]').classList.contains('on');
+  const save = async on => {
+    const msg = auto.querySelector('[data-msg]'); msg.className = 'msg'; msg.textContent = 'Saving…';
+    const body = { repo:b.repo, project:project(), on, on_answers:true, on_board:true, on_ready:true,
+      max_jobs:segVal(auto, 'autojobs'), gap_minutes:segVal(auto, 'gap'), per_day:segVal(auto, 'day') };
+    const r = await fetch('/api/triage/auto', { method:'PUT', headers:{ 'content-type':'application/json' }, body:JSON.stringify(body) });
+    if (!r.ok) { msg.className = 'msg bad'; msg.textContent = (await r.text()).trim(); return false; }
+    msg.className = 'msg good'; msg.textContent = 'Saved'; setTimeout(() => { if (msg.textContent === 'Saved') msg.textContent = ''; }, 1800);
+    boardLoad(); return true;
+  };
+  pane.querySelectorAll('.seg').forEach(g => g.querySelectorAll('button').forEach(btn => btn.onclick = () => {
+    g.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === btn));
+    if (auto.contains(g) && autoOn()) save(true);
+  }));
+  document.querySelectorAll('#bd-modes [data-mode]').forEach(m => m.onclick = async () => {
+    const on = m.dataset.mode === 'auto'; if (on === autoOn()) return;
+    document.querySelectorAll('#bd-modes [data-mode]').forEach(x => x.classList.toggle('on', x === m));
+    auto.hidden = !on;
+    // it didn't save: back to how it was, with the reason left in view
+    if (!await save(on)) { document.querySelectorAll('#bd-modes [data-mode]').forEach(x => x.classList.toggle('on', x !== m)); auto.hidden = false; }
+  });
+  document.getElementById('bd-go').onclick = async () => {
+    const msg = run.querySelector('[data-msg]'); msg.className = 'msg'; msg.textContent = 'Starting…';
+    const body = { repo:b.repo, project:project(), max_jobs:segVal(run, 'jobs'), minutes:segVal(run, 'minutes'), focus:run.querySelector('.focus').value.trim() };
     const r = await fetch('/api/triage', { method:'POST', headers:{ 'content-type':'application/json' }, body:JSON.stringify(body) });
     if (!r.ok) { msg.className = 'msg bad'; msg.textContent = (await r.text()).trim(); return; }
-    msg.textContent = 'He is on it. His run shows below.'; run.focus.value = ''; boardLoad();
-  };
-  const auto = document.getElementById('bd-auto');
-  auto.onsubmit = async ev => {
-    ev.preventDefault(); const msg = auto.querySelector('[data-msg]'); msg.className = 'msg'; msg.textContent = 'Saving…';
-    const body = { repo:b.repo, project:(run.project.value || b.project || '').trim().toUpperCase(), on:auto.on.checked, on_answers:auto.on_answers.checked, on_board:auto.on_board.checked, on_ready:auto.on_ready.checked,
-      max_jobs:+auto.max_jobs.value, gap_minutes:+auto.gap_minutes.value, per_day:+auto.per_day.value, level:auto.level.value };
-    const r = await fetch('/api/triage/auto', { method:'PUT', headers:{ 'content-type':'application/json' }, body:JSON.stringify(body) });
-    if (!r.ok) { msg.className = 'msg bad'; msg.textContent = (await r.text()).trim(); return; }
-    msg.textContent = body.on ? 'Saved. He runs on his own when one of these happens.' : 'Saved. He runs only when you say.'; boardLoad();
+    msg.className = 'msg good'; msg.textContent = 'He is on it. Follow along below or on the map.'; run.querySelector('.focus').value = ''; boardLoad();
   };
 }
 function boardStatus(b) {
-  const btn = document.querySelector('#bd-run button[type=submit]');
+  const btn = document.getElementById('bd-go');
   if (btn && BOARD.yt.configured) { btn.disabled = !!b.running; btn.textContent = b.running ? 'He is working…' : 'Run Pericles now'; }
-  const last = document.getElementById('bd-last');
-  if (last) last.textContent = b.auto.on ? (b.last_auto ? 'Last look: ' + b.last_auto : 'The engine takes its first look within 5 minutes.') : '';
+  const st = document.getElementById('bd-state'), last = BOARD.runs[0];
+  if (st) {
+    const [cls, txt] = b.running ? ['running', 'Working on the board'] : last?.state === 'failed' ? ['failed', 'Last run failed'] : b.auto.on ? ['auto', 'Runs on his own'] : last ? ['done', 'Idle'] : ['', 'Never run here'];
+    st.innerHTML = `<i class="dot ${cls}"></i>${txt}`;
+  }
+  const note = document.getElementById('bd-last');
+  if (note) note.textContent = b.auto.on ? (b.last_auto ? 'Last check at ' + b.last_auto.replace(/^(\d\d:\d\d): /, '$1: ') : 'He checks the board every 5 minutes. The first check is coming.') : '';
 }
 function runCard(r) {
   const state = r.state || 'running', rep = r.report, jobs = r.jobs || [], qs = r.questions || [];
   const started = jobs.filter(x => x.job), recs = jobs.filter(x => !x.job);
-  const jobLine = x => `<li>${ticketLink(x.issue)}${x.job ? ` → job <a href="#" data-job="${escHTML(x.job)}">${escHTML(x.job)}</a>` : ''}${x.why ? ': ' + escHTML(x.why) : ''}</li>`;
+  const jobLine = x => `<li>${ticketLink(x.issue)}${x.job ? ` → <a href="#" data-job="${escHTML(x.job)}">open its city</a>` : ''}${x.why ? ': ' + escHTML(x.why) : ''}</li>`;
   const part = (label, items) => items.length ? `<div><div class="lbl">${label}</div><ul>${items.join('')}</ul></div>` : '';
-  return `<div class="run"><div class="top"><span class="pill ${escHTML(state)}">${escHTML(state === 'running' ? 'working' : state)}</span>
-      <small>${escHTML(runAgo(r.started))} · ${r.auto ? 'on his own: ' + escHTML(r.why || '') : escHTML(r.why || 'you started it')} · ${escHTML(r.level)}${r.max_jobs ? `, up to ${r.max_jobs} jobs` : ', recommend only'}</small>
+  const title = { running:'Working', done:'Done', failed:'Failed', stopped:'Stopped' }[state] || state;
+  const facts = [r.auto ? 'on his own' : 'you started it', started.length ? `${started.length} job${started.length > 1 ? 's' : ''} started` : '', qs.length ? `${qs.length} question${qs.length > 1 ? 's' : ''}` : ''].filter(Boolean);
+  return `<div class="run ${escHTML(state)}"><div class="top"><i class="dot ${escHTML(state)}"></i><b>${title}</b><small>${escHTML(runAgo(r.started))}${r.auto && r.why ? ' · ' + escHTML(r.why) : ''}</small>
       ${state === 'running' ? `<button type="button" data-stop="${escHTML(r.id)}">Stop</button>` : ''}</div>
+    <div class="tags">${facts.map(f => `<span>${escHTML(f)}</span>`).join('')}</div>
     ${rep ? `<div>${escHTML(rep.summary)}</div>` : state === 'running' ? '<div class="note">Reading the board…</div>' : ''}
     ${r.error ? `<div class="err">${escHTML(r.error)}</div>` : ''}
     ${part('Started jobs', started.map(jobLine))}
-    ${part('Recommended', recs.map(jobLine))}
+    ${part('Suggested', recs.map(jobLine))}
     ${part('Asked the owner', qs.map(q => `<li>${ticketLink(q.issue)}: ${escHTML(q.question)}${q.on_ticket ? '' : ` <span class="note">(${escHTML(q.posted)})</span>`}</li>`))}
     ${part('Ready, not started', (rep?.ready || []).map(x => `<li>${ticketLink(x)}</li>`))}
     ${part('Waiting on the owner', (rep?.blocked || []).map(x => `<li>${escHTML(x)}</li>`))}</div>`;

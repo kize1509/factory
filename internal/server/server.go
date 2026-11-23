@@ -467,6 +467,16 @@ func (s *Server) resume(w http.ResponseWriter, r *http.Request) {
 
 // tool handles the factory tools Pi agents call over HTTP.
 func (s *Server) tool(w http.ResponseWriter, r *http.Request) {
+	if run := s.triageOf(r.PathValue("job")); run != nil {
+		body, _ := io.ReadAll(r.Body)
+		text, err := s.triageTool(run, r.PathValue("agent"), r.PathValue("tool"), body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+			return
+		}
+		fmt.Fprint(w, text)
+		return
+	}
 	if p := s.passOf(r.PathValue("job")); p != nil {
 		body, _ := io.ReadAll(r.Body)
 		if text, handled, err := s.opsTool(r.PathValue("job"), r.PathValue("agent"), r.PathValue("tool"), body); handled {

@@ -58,7 +58,7 @@ type Board struct {
 	Name     string            `json:"name"`
 	Project  string            `json:"project"`             // the YouTrack project, "" when unknown
 	Mapped   bool              `json:"mapped"`              // factory.yml names the project
-	Level    string            `json:"level"`               // the tracker's level, the default for a run
+	Level    string            `json:"level"`               // the tracker's level (Hermes's); runs use fix
 	Auto     config.TriageAuto `json:"auto"`                // when it runs on its own
 	Running  string            `json:"running,omitempty"`   // the run going now
 	LastAuto string            `json:"last_auto,omitempty"` // when the schedule last looked, and what it decided
@@ -172,10 +172,12 @@ func (s *Server) putAuto(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		if !a.OnBoard && !a.OnAnswers && !a.OnReady {
-			http.Error(w, "tick at least one thing that makes it run", http.StatusBadRequest)
-			return
+		// he always picks up an owner's answer; with nothing else picked he
+		// also wakes for board changes and for finished jobs
+		if !a.OnBoard && !a.OnReady {
+			a.OnBoard, a.OnReady = true, true
 		}
+		a.OnAnswers = true
 	}
 	e := config.LoadEngine()
 	if e.Triage == nil {

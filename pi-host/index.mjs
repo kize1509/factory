@@ -159,6 +159,48 @@ function opsTools(req) {
   ];
 }
 
+// The product agent (Pericles, role product) runs one board: the tracker
+// tools above plus its own, all served by the engine for its triage run.
+function productTools(req) {
+  const call = async (tool, params) => {
+    const res = await fetch(`${req.engine}/api/tools/${req.job}/${req.agent}/${tool}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(params),
+    });
+    const text = await res.text();
+    return { content: [{ type: "text", text: res.ok ? text : `Error: ${text}` }], details: {} };
+  };
+  const tool = (name, description, parameters) =>
+    defineTool({ name, label: name, description, parameters, execute: (_id, params) => call(name, params) });
+  const S = Type.String(), L = Type.Array(Type.String()), O = (t) => Type.Optional(t);
+  return [
+    tool("ask_owner", "Put one question to a ticket's owner. It goes on the ticket as a comment; the owner answers there.", Type.Object({ issue: S, question: S })),
+    tool("start_job", "Ask the engine to start a job on a ready ticket. why is one line; notes is what the job should know.", Type.Object({ issue: S, why: S, notes: O(S) })),
+    tool("finish_triage", "End the triage run with a summary, the ready tickets you didn't start, and the tickets waiting on the owner.", Type.Object({ summary: S, ready: O(L), blocked: O(L) })),
+  ];
+}
+
+const TRACKER = ["tracker_search", "tracker_read", "knowledge_search", "tracker_create", "tracker_update", "tracker_move", "tracker_comment", "tracker_link", "tracker_attach"];
+
+// The tools each role gets, by name, and the definitions behind them.
+function toolsFor(req) {
+  const look = req.tools || ["read", "grep", "find", "ls"];
+  if (req.role === "ops") {
+    return { names: [...look, "set_status", "ask_ops", "report", ...TRACKER, "answer", "handover"], custom: [...factoryTools(req), ...opsTools(req)] };
+  }
+  if (req.role === "product") {
+    return { names: [...look, "set_status", ...TRACKER, "ask_owner", "start_job", "finish_triage"], custom: [...factoryTools(req), ...opsTools(req), ...productTools(req)] };
+  }
+  return {
+    names: [...(req.tools || ["read", "bash", "edit", "write", "grep", "find", "ls"]), "handoff", "set_checks", "set_status", "ask_ops", "report",
+      ...(req.role === "reviewer" ? ["ask_builder", "verdict", "grade"] : ["ask_human"]),
+      ...(req.role === "builder" || req.role === "planner" ? ["propose_experiments"] : []),
+      ...(req.role === "planner" ? ["name_job"] : [])],
+    custom: factoryTools(req),
+  };
+}
+
 // models.json routes Pi's built-in providers through the engine's gateway.
 function writeModels(req) {
   mkdirSync(req.agentDir, { recursive: true });
@@ -197,19 +239,14 @@ async function start(req) {
     appendSystemPrompt: req.system ? [req.system] : [],
   });
   await loader.reload();
+  const tools = toolsFor(req);
   const { session } = await createAgentSession({
     cwd: req.cwd,
     agentDir: req.agentDir,
     model,
     thinkingLevel: req.thinking || "medium",
-    tools: req.role === "ops"
-      ? [...(req.tools || ["read", "grep", "find", "ls"]), "set_status", "ask_ops", "report", "tracker_search", "tracker_read", "knowledge_search",
-         "tracker_create", "tracker_update", "tracker_move", "tracker_comment", "tracker_link", "tracker_attach", "answer", "handover"]
-      : [...(req.tools || ["read", "bash", "edit", "write", "grep", "find", "ls"]), "handoff", "set_checks", "set_status", "ask_ops", "report",
-      ...(req.role === "reviewer" ? ["ask_builder", "verdict", "grade"] : ["ask_human"]),
-      ...(req.role === "builder" || req.role === "planner" ? ["propose_experiments"] : []),
-      ...(req.role === "planner" ? ["name_job"] : [])],
-    customTools: req.role === "ops" ? [...factoryTools(req), ...opsTools(req)] : factoryTools(req),
+    tools: tools.names,
+    customTools: tools.custom,
     resourceLoader: loader,
     sessionManager: SessionManager.inMemory(req.cwd),
     modelRuntime,

@@ -87,8 +87,12 @@ func TestTriageRunOverHTTPAndMCP(t *testing.T) {
 	if out := mcp("pericles", "handoff", `{}`); !strings.Contains(out, "no tool") {
 		t.Fatalf("job tools aren't the product agent's: %s", out)
 	}
-	if out := mcp("pericles", "finish_triage", `{"summary":"nothing open"}`); !strings.Contains(out, "Run finished") {
-		t.Fatal(out)
+	// pi agents call the same tools over /api/tools
+	if w := post("/api/tools/triage-"+started.ID+"/pericles/handoff", `{}`); w.Code != 422 || !strings.Contains(w.Body.String(), "no tool") {
+		t.Fatalf("pi: job tools aren't the product agent's: %d %s", w.Code, w.Body)
+	}
+	if w := post("/api/tools/triage-"+started.ID+"/pericles/finish_triage", `{"summary":"nothing open"}`); w.Code != 200 || !strings.Contains(w.Body.String(), "Run finished") {
+		t.Fatalf("pi: %d %s", w.Code, w.Body)
 	}
 	close(rt.release)
 	for i := 0; i < 200 && s.triageOf("triage-"+started.ID).StateNow() == triage.Running; i++ {
@@ -118,13 +122,17 @@ func TestTriageRunOverHTTPAndMCP(t *testing.T) {
 		h.ServeHTTP(w, httptest.NewRequest("PUT", "/api/triage/auto", strings.NewReader(body)))
 		return w
 	}
-	if w := put(`{"repo":"` + repo + `","on":true,"project":"HF"}`); w.Code != 400 || !strings.Contains(w.Body.String(), "at least one") {
+	// turned on with nothing picked: he wakes for everything
+	if w := put(`{"repo":"` + repo + `","on":true,"project":"HF"}`); w.Code != 200 {
 		t.Fatalf("%d %s", w.Code, w.Body)
+	}
+	if a := config.LoadEngine().Triage[repo]; !a.OnAnswers || !a.OnBoard || !a.OnReady {
+		t.Fatalf("saved %+v", a)
 	}
 	if w := put(`{"repo":"` + repo + `","on":true,"project":"HF","on_board":true,"max_jobs":1}`); w.Code != 200 {
 		t.Fatalf("%d %s", w.Code, w.Body)
 	}
-	if a := config.LoadEngine().Triage[repo]; !a.On || !a.OnBoard || a.Project != "HF" {
+	if a := config.LoadEngine().Triage[repo]; !a.On || !a.OnBoard || !a.OnAnswers || a.OnReady || a.Project != "HF" {
 		t.Fatalf("saved %+v", a)
 	}
 	// the last run ended a moment ago, so the gap holds the schedule back
