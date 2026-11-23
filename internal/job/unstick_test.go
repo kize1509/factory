@@ -12,6 +12,7 @@ import (
 	"factory/internal/events"
 	"factory/internal/handoff"
 	"factory/internal/runtime"
+	"factory/internal/workspace"
 )
 
 // failingGH puts a gh on PATH that always fails, so a PR can't open.
@@ -334,5 +335,41 @@ func TestMarkItDone(t *testing.T) {
 	l.nudge("", "complete")
 	if st := l.settle(2); st != "done" || j.Commit != "" {
 		t.Fatalf("state %s commit %q error %q", st, j.Commit, j.Error)
+	}
+}
+
+// A push in a repository with no remote: the job offers to make one, and
+// making it ships the work there.
+func TestNoRemoteOffersToCreateOne(t *testing.T) {
+	base := t.TempDir()
+	bin := t.TempDir()
+	os.WriteFile(filepath.Join(bin, "gh"), []byte(`#!/bin/sh
+case "$1 $2" in
+"auth status") echo '{"hosts":{"github.com":[{"state":"success","active":true,"login":"alice"}]}}' ;;
+"auth token") echo tok ;;
+"repo create") mkdir -p "`+base+`/$3.git" && git init -q --bare "`+base+`/$3.git" ;;
+*) exit 2 ;;
+esac
+`), 0o755)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	old := workspace.GitHubBase
+	workspace.GitHubBase = "file://" + base
+	t.Cleanup(func() { workspace.GitHubBase = old })
+
+	repo := gitRepo(t)
+	l := start(t, Spec{Ship: "push", ID: "U6", Title: "make app", Repo: repo, Prompt: "write done"}, &committingRT{})
+	if st := l.settle(1); st != "stuck" {
+		t.Fatalf("state %s", st)
+	}
+	if got := actionIDs(l.j.Actions); got != "create_remote,commit_only,complete" {
+		t.Fatalf("actions %s; error %s", got, l.j.Error)
+	}
+	l.nudge("", "create_remote")
+	if st := l.settle(2); st != "done" {
+		t.Fatalf("state %s error %q", st, l.j.Error)
+	}
+	name := filepath.Base(repo)
+	if got := gitOut(t, base+"/alice/"+name+".git", "show", "factory/U6:app.txt"); got != "done" {
+		t.Fatalf("pushed app.txt %q", got)
 	}
 }

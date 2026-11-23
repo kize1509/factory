@@ -25,6 +25,7 @@ import (
 	"factory/internal/runtime"
 	"factory/internal/store"
 	"factory/internal/triage"
+	"factory/internal/workspace"
 	"factory/internal/youtrack"
 )
 
@@ -80,6 +81,7 @@ func (s *Server) Handler() http.Handler {
 	s.adminRoutes(mux)
 	s.passRoutes(mux)
 	s.triageRoutes(mux)
+	s.repoRoutes(mux)
 	s.opsRoutes(mux)
 	mux.HandleFunc("POST /mcp/{job}/{agent}", s.mcp)
 	mux.Handle("/llm/", s.Gateway)
@@ -167,8 +169,32 @@ func (s *Server) launch(ctx context.Context, spec job.Spec) (string, int, error)
 	if err != nil {
 		return launchErr(http.StatusBadRequest, "%s", "factory.yml: "+err.Error())
 	}
+	if spec.Issue != "" {
+		if msg, hard := s.repoMismatch(spec.Issue, spec.Repo, proj); msg != "" && (hard || !spec.ConfirmRepo) {
+			code := http.StatusConflict // you can confirm it
+			if hard {
+				code = http.StatusBadRequest
+			}
+			return launchErr(code, "%s", msg)
+		}
+	}
 	if spec.Ship = config.ShipMode(ticketShip, proj.Ship); spec.Ship == "" {
 		return launchErr(http.StatusBadRequest, "%s", fmt.Sprintf("unknown ship mode (ticket %q, factory.yml %q); use commit, push or pr", ticketShip, proj.Ship))
+	}
+	if spec.NewRemote != nil {
+		if workspace.HasOrigin(spec.Repo) {
+			spec.NewRemote = nil // it has one: ship there
+		} else {
+			if err := spec.NewRemote.Check(spec.Repo); err != nil {
+				return launchErr(http.StatusBadRequest, "%s", err.Error())
+			}
+			if !hasAccount(spec.NewRemote.As) {
+				return launchErr(http.StatusBadRequest, "gh isn't logged in as %s; pick one of its accounts", spec.NewRemote.As)
+			}
+			if spec.Ship == "commit" {
+				spec.Ship = "push" // a new repository is only worth it if the work goes there
+			}
+		}
 	}
 	if len(spec.Checks) == 0 && strings.TrimSpace(spec.TestNotes) == "" {
 		spec.Checks = proj.Checks.SavedPlan // D23: use the saved plan when there is one

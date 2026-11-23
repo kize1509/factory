@@ -29,4 +29,6 @@ Open http://localhost:7777 for the map and http://localhost:7777/admin.html to a
 
 In each repo you want Factory to work on, run `factory init`. It writes `factory.yml` and adds `.factory/` to `.gitignore`.
 
+New task never carries the repository over from your last job. Type the ticket ID and it suggests the repositories that project's tickets ran in before; you pick one. If the ticket's project doesn't match the repo (its `factory.yml` maps another project, or the repo has only run other projects' tickets), the engine says so and waits for you to confirm. A folder that isn't a git repository yet can be made one from the form; what's in it becomes the first commit. For a repository with no remote, tick **Create a private GitHub repository for it** and pick the `gh` account: the engine creates it when the work ships, pushes there, and opens PRs as that account. A job that tries to push with no remote stops and offers the same.
+
 To have the product agent go over a repo's board, asking owners, fixing tickets and starting jobs on the ready ones, press **🏛 Board** on the map. You can run him there or let him run on his own when something happens on the board. See `docs/TRIAGE.md`.

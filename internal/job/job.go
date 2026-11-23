@@ -42,9 +42,15 @@ type Spec struct {
 	// simple, medium or complex; complex work (or you saying so in the notes)
 	// gets a planner and, when there are several approaches, a Symposium
 	Complexity string              `json:"complexity,omitempty"`
-	Roles      map[string]RoleSpec `json:"roles,omitempty"`   // runtime, model and skills per role
-	Ship       string              `json:"ship,omitempty"`    // commit (the default), push or pr
-	Project    string              `json:"project,omitempty"` // the project's readable name, given once by the planner
+	Roles      map[string]RoleSpec `json:"roles,omitempty"` // runtime, model and skills per role
+	Ship       string              `json:"ship,omitempty"`  // commit (the default), push or pr
+	// NewRemote is the private GitHub repository to create when the work
+	// ships and the repo has no remote yet.
+	NewRemote *workspace.NewRemote `json:"new_remote,omitempty"`
+	// ConfirmRepo says you checked the repository for a ticket from a
+	// project this repo hasn't worked on.
+	ConfirmRepo bool   `json:"confirm_repo,omitempty"`
+	Project     string `json:"project,omitempty"` // the project's readable name, given once by the planner
 }
 
 // Ops is the operations agent as the job sees it: it builds the handover
@@ -719,6 +725,16 @@ func (j *Job) ship(wt *workspace.Worktree) error {
 		return nil
 	}
 	j.set("shipping")
+	if !workspace.HasOrigin(wt.Repo) {
+		if j.NewRemote == nil {
+			return errNoRemote
+		}
+		url, err := workspace.CreateGitHubRepo(wt.Repo, *j.NewRemote)
+		if err != nil {
+			return fmt.Errorf("create the GitHub repository: %w", err)
+		}
+		j.emit("", "ship.remote_created", map[string]any{"url": url, "as": j.NewRemote.As})
+	}
 	push := wt.Push
 	if j.force {
 		push = wt.ForcePush
@@ -782,6 +798,9 @@ func (j *Job) prBody() string {
 }
 
 var errSameFailure = fmt.Errorf("the same check failed the same way twice")
+
+// errNoRemote stops a push or PR in a repository that has nowhere to push to.
+var errNoRemote = fmt.Errorf("this repository has no remote (origin) to push to; create a GitHub repository for it, or keep the commit here")
 
 // checkLoop runs the checks and sends failures back to the builder until
 // they pass or the loops run out. With watch on, the same failure twice in

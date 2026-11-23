@@ -198,7 +198,7 @@ func (w *Worktree) IsClean() bool {
 // returns its URL.
 func (w *Worktree) OpenPR(title, body string) (string, error) {
 	cmd := exec.Command("gh", "pr", "create", "--head", w.RemoteBranch(), "--title", title, "--body", body)
-	cmd.Dir = w.Path
+	cmd.Dir, cmd.Env = w.Path, ghEnv(w.Path)
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	if err := cmd.Run(); err != nil {

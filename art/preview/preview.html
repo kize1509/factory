@@ -120,6 +120,10 @@
   .fsb .foot input { width:auto; margin:0 4px 0 0; vertical-align:middle }
   .fsb .foot button { font-size:10px; padding:3px 7px }
   #fs-pick { font-size:12.5px; color:var(--soft) } #fs-pick.ok b { color:var(--ok) } #fs-pick.bad { color:var(--fail) }
+  #fs-pick button { margin-left:8px } #fs-pick.warn { color:var(--fg) }
+  #repo-suggest { display:flex; flex-wrap:wrap; gap:6px; align-items:center; font-size:12.5px; color:var(--soft) } #repo-suggest:empty { display:none }
+  #remote-box { border:2px solid var(--line); border-radius:4px; padding:8px 10px; display:grid; gap:8px } #remote-box[hidden] { display:none }
+  #nt-confirm { margin-left:8px } #nt-confirm[hidden] { display:none }
   #scene-view { position:fixed; inset:0; overflow:hidden }
   #left { position:absolute; inset:0 }
   #stage { position:absolute; inset:0; overflow:hidden; cursor:grab; touch-action:none;
@@ -367,13 +371,18 @@
       <label><b>How to test it</b> in your own words: which tests or tools prove it works. The agent turns this into commands; the engine runs them.<textarea name="tests" rows="3" placeholder="e.g. the unit tests (go test ./...) and the login e2e in e2e/login.spec.ts. Empty uses the repo's saved check plan."></textarea></label>
       <label style="display:flex;flex-direction:row;gap:8px;align-items:flex-start"><input type="checkbox" name="tests_allowed" style="width:auto;flex:none;margin:3px 0 0;padding:0"><span><b>Let agents change existing tests</b> New test files are always allowed. Without this, the engine puts back any edit to a test file that's already in the repo.</span></label>
       <div style="display:grid;gap:6px">
-        <label><b>Repository</b> the git repo the agents work in: pick it below, or paste its path<input name="repo" required placeholder="~/Projects/my-app" autocomplete="off" spellcheck="false" style="font:13px 'JetBrains Mono', monospace"></label>
+        <div id="repo-suggest"></div>
+        <label><b>Repository</b> the folder the agents work in. Nothing is carried over from your last job: pick it below, or paste its path<input name="repo" required placeholder="~/Projects/my-app" autocomplete="off" spellcheck="false" style="font:13px 'JetBrains Mono', monospace"></label>
         <div id="fs-pick"></div>
         <div class="fsb">
           <div class="recent" id="fs-recent"></div>
           <div class="crumbs" id="fs-crumbs"></div>
           <div class="list" id="fs-list" role="listbox" aria-label="Folders"></div>
           <div class="foot"><span style="flex:1"><input type="checkbox" id="fs-hidden">show hidden folders</span><button type="button" id="fs-here" hidden>Use this folder</button></div>
+        </div>
+        <div id="remote-box" hidden>
+          <label style="display:flex;flex-direction:row;gap:8px;align-items:flex-start"><input type="checkbox" name="new_remote" style="width:auto;flex:none;margin:3px 0 0;padding:0"><span><b>Create a private GitHub repository for it</b> when the work ships, and push the work there. Without this the work stays here as a local commit.</span></label>
+          <div class="row2"><label>Account<select name="gh_as"></select></label><label>Name<input name="gh_name" autocomplete="off" spellcheck="false" style="font:13px 'JetBrains Mono', monospace"></label></div>
         </div>
       </div>
       <details><summary>Runtime and model</summary>
@@ -386,7 +395,7 @@
       </details>
       <div id="yt-note" style="font-size:12.5px;color:var(--soft)"></div>
     </div>
-    <div class="mf"><button type="submit" class="primary">Start the job</button><span class="err" id="nterr"></span><span style="flex:1"></span><button type="button" data-close>Cancel</button></div>
+    <div class="mf"><button type="submit" class="primary">Start the job</button><span class="err" id="nterr"></span><button type="button" id="nt-confirm" hidden>Start it there anyway</button><span style="flex:1"></span><button type="button" data-close>Cancel</button></div>
   </form>
 </div></div>
 <div class="modal wide" id="m-board" role="dialog" aria-modal="true" aria-labelledby="m-board-t"><div class="box">
@@ -1722,6 +1731,7 @@ function onEvent(j, e) {
     case 'workspace.blocked_write': say(`Archimedes changed test files (${(d.files || []).join(', ')}). The engine undid it: agents don't edit tests.`); break;
     case 'human.message': say(`You sent Archimedes a message: "${d.text}".`); break;
     case 'ship.uncommitted': say(`Archimedes had committed on his own. The engine undid that commit and kept the changes, so it makes the one commit itself.`); break;
+    case 'ship.remote_created': say(`The engine created the private GitHub repository ${d.url} as ${d.as}, and ships there.`, 'ship'); break;
     case 'job.pushed': if (!old) sail(j, 'push'); say(`Pushed ${code(d.branch)} to origin. A boat leaves ${j.city} with it.`, 'ship'); break;
     case 'job.pr_opened': j.pr = d.url; if (!old) sail(j, 'pull request'); say(`Pull request opened: ${d.url}`, 'ship'); break;
     case 'job.committed': if (!old) sail(j, 'commit ' + d.sha); say(`Committed ${code(d.sha)} on ${code(d.branch)}. The ship sails with the work.`, 'ship');
@@ -1871,7 +1881,7 @@ addEventListener('pointerdown', () => { try { audio ||= new AudioContext(); if (
 let guideJob = null;
 const STEP_NAME = { starting:'the start', planning:'planning', symposium:'the Symposium', grading:'grading', building:'building', checking:'the checks', handoff:'the handoff', reviewing:'review', committing:'the commit', shipping:'shipping' };
 const ACTION_SAID = { retry:'it tries the step again', skip_pr:'it pushes without opening a PR', new_branch:'it pushes to a new branch', force_push:"it overwrites origin's branch",
-  commit_only:'it keeps the commit and ships nothing', commit_anyway:'it commits the work as it is' };
+  commit_only:'it keeps the commit and ships nothing', create_remote:'it creates a private GitHub repository and ships there', complete:'it marks the job done', commit_anyway:'it commits the work as it is' };
 // the ways out a stuck job offers, as buttons; your text, if any, goes along
 function guideActions(j) {
   const L = j.live || {}, acts = L.state === 'stuck' ? L.stuck?.actions || [] : [], box = document.getElementById('gd-acts'), rep = document.getElementById('gd-repeat');
@@ -1964,10 +1974,11 @@ addEventListener('message', e => {
 // ---------- New task: an issue ID plus optional notes ----------
 async function openTask() {
   const f = document.getElementById('ntf'), saved = (() => { try { return JSON.parse(localStorage.getItem('newtask') || '{}'); } catch { return {}; } })();
-  f.reset(); document.getElementById('nterr').textContent = '';
-  f.repo.value = saved.repo || ''; f.tests.value = saved.tests || '';
-  document.getElementById('fs-pick').textContent = '';
-  browseTo(saved.repo ? saved.repo.replace(/\/[^/]+\/?$/, '') : '').then(ok => { if (!ok) browseTo(''); });
+  f.reset(); document.getElementById('nterr').textContent = ''; document.getElementById('nt-confirm').hidden = true;
+  // the repository and its test notes are never carried over from the last job: each ticket gets picked on purpose
+  f.repo.value = ''; f.tests.value = '';
+  document.getElementById('fs-pick').textContent = ''; document.getElementById('repo-suggest').textContent = ''; document.getElementById('remote-box').hidden = true;
+  browseTo('');
   checkRepo();
   f.runtime.innerHTML = [['', 'from Admin → Roles'], ['pi', 'Pi'], ['claude-code', 'Claude Code'], ['codex', 'Codex']].map(([v, n]) => `<option value="${v}">${n}</option>`).join('');
   f.model.innerHTML = [['', 'from Admin → Roles'], ...['anthropic/claude-haiku-5-5', 'anthropic/claude-sonnet-5-5', 'anthropic/claude-opus-5-5', 'openai/gpt-6-luna', 'openai/gpt-6.1-terra', 'openai/gpt-6.1-sol'].map(m => [m, m])].map(([v, n]) => `<option value="${v}">${n}</option>`).join('');
@@ -2013,18 +2024,60 @@ function pickRepo(path) {
   fsRepo().value = path; checkRepo();
   document.querySelectorAll('#fs-list .row').forEach(b => b.classList.toggle('sel', b.dataset.pick === path));
 }
-// say whether what's in the field is a repo the factory can use
-let repoTimer;
+// say whether what's in the field is a repo the factory can use, offer to
+// make one when it isn't, and to make a GitHub remote when it has none
+let repoTimer, repoInfo = null;
 async function checkRepo() {
-  const v = fsRepo().value.trim(), out = document.getElementById('fs-pick');
+  const v = fsRepo().value.trim(), out = document.getElementById('fs-pick'), box = document.getElementById('remote-box');
+  repoInfo = null; box.hidden = true;
   if (!v) { out.className = ''; out.textContent = ''; return; }
-  const r = await fetch('/api/fs?' + new URLSearchParams({ path:v }), { cache:'no-store' }).catch(() => null);
+  const r = await fetch('/api/repos/info?' + new URLSearchParams({ path:v }), { cache:'no-store' }).catch(() => null);
   if (fsRepo().value.trim() !== v) return;
   const d = r && r.ok ? await r.json() : null;
-  if (!d) { out.className = 'bad'; out.textContent = 'There is no folder at this path.'; }
-  else if (!d.repo) { out.className = 'bad'; out.textContent = "This folder isn't a git repository. Pick one marked git."; }
-  else { out.className = 'ok'; out.innerHTML = `<b>✓</b> ${escHTML(d.name || projectName(d.path))}, a git repository`; }
+  if (!d) { out.className = 'bad'; out.textContent = 'The engine is not answering.'; return; }
+  repoInfo = d;
+  if (!d.exists || !d.repo) {
+    out.className = 'bad';
+    out.innerHTML = (d.exists ? "This folder isn't a git repository yet." : 'There is no folder here yet.') +
+      `<button type="button" id="fs-init">${d.exists ? 'Make it a git repository' : 'Create it as a new git repository'}</button>` +
+      `<span style="display:block;color:var(--soft)">${d.exists ? 'What is in the folder now becomes its first commit, on main.' : 'The folder is created with an empty first commit, on main.'}</span>`;
+    document.getElementById('fs-init').onclick = async ev => {
+      ev.target.disabled = true; ev.target.textContent = 'Making it…';
+      const q = await fetch('/api/repos/init', { method:'POST', headers:{ 'content-type':'application/json' }, body:JSON.stringify({ path:v }) });
+      if (!q.ok) { out.innerHTML = escHTML((await q.text()).trim()); return; }
+      browseTo(v.replace(/\/+$/, '').replace(/\/[^/]+$/, '') || '/', true); checkRepo();
+    };
+    return;
+  }
+  out.className = 'ok';
+  out.innerHTML = `<b>✓</b> ${escHTML(d.name || projectName(d.root))}, a git repository` + (d.origin ? ` · ships to <code>${escHTML(d.origin.replace(/^(git@|https?:\/\/)/, ''))}</code>` : ' · no remote yet');
+  if (!d.origin) {
+    box.hidden = false;
+    const f = document.getElementById('ntf');
+    if (!f.gh_name.value || f.gh_name.dataset.auto === '1') { f.gh_name.value = (d.root || v).replace(/\/+$/, '').split('/').pop(); f.gh_name.dataset.auto = '1'; }
+    if (!f.gh_as.options.length) {
+      const a = await fetch('/api/github/accounts', { cache:'no-store' }).then(x => x.json()).catch(() => ({ accounts:[] }));
+      f.gh_as.innerHTML = a.accounts.length ? a.accounts.map(x => `<option value="${escHTML(x.login)}"${x.active ? ' selected' : ''}>${escHTML(x.login)}${x.active ? ' (active in gh)' : ''}</option>`).join('')
+        : `<option value="">${escHTML(a.error || 'gh is not logged in')}</option>`;
+      f.new_remote.disabled = !a.accounts.length;
+    }
+  }
 }
+document.getElementById('ntf').gh_name.addEventListener('input', ev => ev.target.dataset.auto = '0');
+// the repositories this ticket's project ran in before: one click picks one, nothing is picked for you
+let suggestTimer;
+document.getElementById('ntf').issue.addEventListener('input', () => {
+  clearTimeout(suggestTimer);
+  suggestTimer = setTimeout(async () => {
+    const issue = document.getElementById('ntf').issue.value.trim(), box = document.getElementById('repo-suggest');
+    if (!/^[A-Za-z][A-Za-z0-9]*-\d+$/.test(issue)) { box.textContent = ''; return; }
+    const d = await fetch('/api/repos/suggest?' + new URLSearchParams({ issue }), { cache:'no-store' }).then(r => r.json()).catch(() => null);
+    if (!d || document.getElementById('ntf').issue.value.trim() !== issue) return;
+    box.innerHTML = d.repos.length ? `<span>${escHTML(d.project)} tickets ran in:</span>` + d.repos.map(r => `<button type="button" data-pick="${escHTML(r.path)}" title="${escHTML(r.path)}">${escHTML(r.name)}</button>`).join('')
+      : `<span>No ${escHTML(d.project)} ticket ran here before. Pick its repository below, or make a new one.</span>`;
+    box.querySelectorAll('[data-pick]').forEach(b => b.onclick = () => { pickRepo(b.dataset.pick); browseTo(b.dataset.pick.replace(/\/[^/]+$/, '') || '/'); });
+  }, 300);
+});
 document.querySelector('#m-task .fsb').addEventListener('click', ev => {
   const go = ev.target.closest('[data-go]'), pick = ev.target.closest('[data-pick]');
   if (go) browseTo(go.dataset.go);
@@ -2040,9 +2093,17 @@ document.getElementById('ntf').onsubmit = async ev => {
   const f = new FormData(ev.target), err = document.getElementById('nterr');
   const body = { issue:String(f.get('issue')).trim().toUpperCase(), notes:String(f.get('notes')).trim(), repo:String(f.get('repo')).trim(),
     test_notes:String(f.get('tests')).trim(), tests_allowed:f.get('tests_allowed') === 'on', complexity:f.get('complexity'), model:f.get('model') || undefined, runtime:f.get('runtime') || undefined };
-  try { localStorage.setItem('newtask', JSON.stringify({ repo:body.repo, tests:f.get('tests'), model:f.get('model'), runtime:f.get('runtime') })); } catch {}
+  try { localStorage.setItem('newtask', JSON.stringify({ model:f.get('model'), runtime:f.get('runtime') })); } catch {}
+  if (ev.target.new_remote.checked && repoInfo?.repo && !repoInfo.origin) body.new_remote = { as:String(f.get('gh_as') || ''), name:String(f.get('gh_name') || '').trim() };
+  if (ev.confirmRepo) body.confirm_repo = true;
+  const again = document.getElementById('nt-confirm'); again.hidden = true;
   err.textContent = 'Starting…';
   const r = await fetch('/api/jobs', { method:'POST', headers:{ 'content-type':'application/json' }, body:JSON.stringify(body) });
+  if (r.status === 409) { // the repository looks wrong for this ticket: say why, and let you go on on purpose
+    err.textContent = (await r.text()).trim(); again.hidden = false;
+    again.onclick = () => { const e = new Event('submit', { cancelable:true }); e.confirmRepo = true; ev.target.dispatchEvent(e); };
+    return;
+  }
   if (!r.ok) { err.textContent = await r.text(); return; }
   const { id } = await r.json();
   closeModal('m-task');
