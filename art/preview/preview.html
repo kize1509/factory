@@ -105,6 +105,7 @@
   .hud .chips button.fold { margin-left:auto }
   .hud.min .chips { margin-bottom:0 }
   .hud.min .track, .hud.min .line { display:none }
+  .hud .line.key, .hud.min .line.key { display:block; font-size:12px; margin-top:4px }
   .hud .track { display:flex; gap:3px; margin:2px 0 6px }
   .hud .track span { flex:1 1 0; min-width:0; text-align:center; font:9px Silkscreen, monospace; padding:4px 3px; border-radius:2px; background:var(--bg); color:var(--soft); border:1px solid var(--line);
                      white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
@@ -116,6 +117,7 @@
   .citycard { position:absolute; left:0; top:0; width:190px; background:var(--card); border:2px solid var(--accent); border-radius:6px; padding:7px 9px; font-size:12px; cursor:pointer;
               box-shadow:0 6px 16px rgba(20,33,61,.18); transition:transform .15s, opacity .3s; will-change:transform }
   .citycard:hover { border-color:var(--gold); z-index:2 }
+  .boatcard { position:absolute; left:0; top:0; pointer-events:none; white-space:nowrap; font:10px Silkscreen, monospace; color:var(--fg); background:var(--card); border:1px solid var(--accent); border-radius:3px; padding:2px 5px; box-shadow:0 3px 8px rgba(20,33,61,.18) }
   .citycard:not(:hover) .t, .citycard:not(:hover) .bar { display:none }
   /* zoomed out the cities are closer than a card is wide: a name chip, the whole card on hover */
   .citycard.chip { width:var(--cw); padding:3px 5px; border-width:1px; font-size:11px }
@@ -579,7 +581,7 @@ const JOBS = [
 for (const j of JOBS) j.st = { setup:JOB[j.i], agents:{}, lastSeen:{}, cost:{}, thoughts:{}, convos:[], ship:{ phase:'docked', x:0 }, procs:[], handoffs:{} };
 let cur = JOBS[0], mode = 'aegean';
 function useJob(j) {
-  Object.assign(cur.st, { setup, agents, lastSeen, cost, thoughts, convos, ship, procs, handoffs });
+  Object.assign(cur.st, { agents, lastSeen, cost, thoughts, convos, ship, procs, handoffs }); // st.setup is kept current by applySetup and refresh
   cur = j; ({ agents, lastSeen, cost, thoughts, convos, ship, procs, handoffs } = j.st); scroll = null;
   if (concert) { concert.audio?.pause(); for (const id of concertIds()) delete agents[id]; concert = null; djButton(); }
   ufo = null; closeDrawer(); hidePop(); applySetup(j.st.setup);
@@ -587,12 +589,14 @@ function useJob(j) {
 const STEPS = [['gates','Gates'],['library','Library'],['council','Council'],['academy','Academy'],['workshop','Workshop'],['oracle','Oracle'],['areopagus','Court'],['harbour','Harbour']];
 const AT = { idle:null, intake:'gates', research:'library', plan:'academy', symposium:'academy', build:'workshop', checking:'oracle', failed:'oracle', passed:'oracle', review:'areopagus', human:null, ship:'harbour' };
 const jobCost = j => Object.values(j === cur ? cost : j.st.cost).reduce((a, b) => a + b, 0);
-const jobSetup = j => j === cur ? setup : j.st.setup;
+// the city you're in plays the live setup; every other city, and every city
+// on the world map, keeps its own
+const jobSetup = j => j === cur && mode === 'city' ? setup : j.st.setup;
 const jobAgents = j => j === cur ? Object.values(agents).filter(g => !g.leaving).length : SETUPS[j.st.setup].agents.length;
 function applySetup(k) {
   if (setup !== k || !procs.length) startRuns(k);
   if (setup !== k) { sendHandoff(AT[setup], k === 'symposium' ? 'symposium' : AT[k], k); narrate(NARR[k]); }
-  setup = k; const s = SETUPS[k], here = new Set();
+  setup = k; if (cur) cur.st.setup = k; const s = SETUPS[k], here = new Set();
   const byPlace = {};
   for (const a of s.agents) (byPlace[a[1]] ||= []).push(a);
   for (const [pid, list] of Object.entries(byPlace)) list.forEach((a, i) => {
@@ -917,8 +921,9 @@ function countries() {
 
 // Boats keep to the sea. The map's pixels give a grid of water cells, taken
 // from the sea with all its islands drawn in (so it follows the countries as
-// they grow); routes between cities are found on that grid, kept off the
-// coast, and cached per job.
+// they grow); a boat's route is found on that grid, kept off the coast, and
+// cached. A boat only sails when a job ships: from its city out to the open
+// sea, with what it carries written above it.
 const SEA = 6; let seaGrid = null, seaRoutes = {}, seaKey = '';
 const dayImgs = {};
 const dayImg = file => dayImgs[file] ||= Object.assign(new Image(), { src:file + '.png' });
@@ -947,9 +952,9 @@ function buildSea(key) {
       if (nx >= 0 && ny >= 0 && nx < gw && ny < gh && clear[n] > clear[i] + 1) { clear[n] = clear[i] + 1; q.push(n); } } }
   seaGrid = { gw, gh, clear }; seaRoutes = {}; seaKey = key;
 }
-function seaRoute(ja, jb) {
-  const key = ja.id + '|' + jb.id; if (seaRoutes[key] || !seaGrid) return seaRoutes[key] || null;
-  const { gw, gh, clear } = seaGrid, P = cellPos(ja.cell), Q = cellPos(jb.cell);
+function seaRoute(key, P, Q) {
+  if (seaRoutes[key] || !seaGrid) return seaRoutes[key] || null;
+  const { gw, gh, clear } = seaGrid;
   // a harbour near each city: open water close to it, on the side facing the other
   const harbour = (p, o) => { let best = -1, bs = 1e9;
     for (let i = 0; i < clear.length; i++) { if (clear[i] < 3) continue;
@@ -979,6 +984,19 @@ function seaRoute(ja, jb) {
   let len = 0; pts.forEach((p, i) => { p.d = len += i ? Math.hypot(p.x - pts[i - 1].x, p.y - pts[i - 1].y) : 0; });
   return seaRoutes[key] = pts;
 }
+// the open sea a city's boats sail to: the nearest point on the map's edge
+// that is open water, well off any coast
+function openSea(P) {
+  if (!seaGrid) return null;
+  const { gw, gh, clear } = seaGrid; let best = null, bd = Infinity;
+  const look = (x, y) => { if (clear[y * gw + x] < 4) return; const q = { x:(x + .5) * SEA, y:(y + .5) * SEA }, d = Math.hypot(q.x - P.x, q.y - P.y); if (d < bd) { bd = d; best = q; } };
+  for (let x = 2; x < gw - 2; x += 3) { look(x, 3); look(x, gh - 4); }
+  for (let y = 2; y < gh - 2; y += 3) { look(3, y); look(gw - 4, y); }
+  return best;
+}
+// boats under way: { job, label, t0 }; one starts when a job commits, pushes or opens a PR
+const VOYAGE = 14000; let voyages = [];
+function sail(j, label) { if (j && j.cell >= 0) { voyages = voyages.filter(v => v.job !== j.id); voyages.push({ job:j.id, label:`${j.id} · ${label}`, t0:performance.now() }); } }
 function alongRoute(pts, u) {
   const d = u * pts[pts.length - 1].d; let i = 1; while (i < pts.length - 1 && pts[i].d < d) i++;
   const a = pts[i - 1], b = pts[i], f = b.d > a.d ? (d - a.d) / (b.d - a.d) : 0;
@@ -1010,16 +1028,19 @@ function renderMap(now) {
     bctx.globalAlpha = 0.85; bctx.strokeStyle = c.ink; bctx.lineWidth = 3 * k; bctx.lineJoin = 'round'; bctx.setLineDash([10 * k, 7 * k]); bctx.lineDashOffset = 0;
     bctx.stroke(); bctx.setLineDash([]); bctx.globalAlpha = 1;
   }
-  // sea routes and boats between cities that are working
-  const live = here.filter(j => jobSetup(j) !== 'idle');
-  live.forEach((a, i) => live.slice(i + 1).forEach((b, n) => {
-    if (a.cell < 0 || b.cell < 0) return;
-    const r = seaRoute(...(a.id < b.id ? [a, b] : [b, a])); if (!r || r.length < 2) return;
-    bctx.strokeStyle = dusk ? 'rgba(236,208,106,.7)' : 'rgba(255,255,255,.75)'; bctx.lineWidth = k; bctx.setLineDash([4 * k, 4 * k]); bctx.lineDashOffset = -now / 60;
-    bctx.beginPath(); r.forEach((p, m) => m ? bctx.lineTo(p.x * k, p.y * k) : bctx.moveTo(p.x * k, p.y * k)); bctx.stroke(); bctx.setLineDash([]);
-    const t = ((now / 12000) + i * 0.37 + n * 0.21) % 1, at = alongRoute(r, t < .5 ? t * 2 : 2 - t * 2), bo = A.assets['map/boat'];
+  // a boat for each job that just shipped: out from its city to the open sea
+  for (const v of voyages) {
+    const j = here.find(q => q.id === v.job); if (!j) continue;
+    const P = cellPos(j.cell), Q = openSea(P), r = Q && seaRoute('out:' + j.id + ':' + j.cell, P, Q); if (!r || r.length < 2) continue;
+    const u = Math.min(1, (now - v.t0) / VOYAGE), at = alongRoute(r, u), bo = A.assets['map/boat'];
+    bctx.globalAlpha = u > .85 ? (1 - u) / .15 : 1;
+    // the wake: the part of the route already sailed
+    bctx.strokeStyle = dusk ? 'rgba(236,208,106,.6)' : 'rgba(255,255,255,.7)'; bctx.lineWidth = k; bctx.setLineDash([4 * k, 4 * k]);
+    bctx.beginPath(); bctx.moveTo(r[0].x * k, r[0].y * k); for (const p of r) { if (p.d > u * r[r.length - 1].d) break; bctx.lineTo(p.x * k, p.y * k); } bctx.lineTo(at.x * k, at.y * k); bctx.stroke(); bctx.setLineDash([]);
     sprite(bctx, 'map/boat', 'idle', at.x - bo.w / 2, at.y - bo.h + 3, k, 3, now);
-  }));
+    bctx.globalAlpha = 1; v.at = { x:at.x, y:at.y - bo.h }; v.alpha = u > .85 ? (1 - u) / .15 : 1; // its label is drawn with the city cards
+  }
+  voyages = voyages.filter(v => now - v.t0 < VOYAGE);
   // a city that needs you sends up a beacon
   here.forEach(j => {
     if (!needsYou(j)) return; const p = cellPos(j.cell);
@@ -1048,6 +1069,12 @@ function renderMap(now) {
     e.classList.toggle('chip', chip); e.style.setProperty('--cw', cw + 'px');
     e.style.transform = `translate(${sx - cw / 2}px, ${sy + 24 * mc.z}px)`;
   });
+  // what each boat carries, above its sail
+  for (const v of voyages) {
+    if (!v.at) continue; const key = 'v:' + v.job, e = el(key, 'boatcard'); seen.add(key);
+    if (e.textContent !== v.label) e.textContent = v.label;
+    e.style.opacity = v.alpha; e.style.transform = `translate(${(v.at.x - mc.x) * mc.z}px, ${(v.at.y - mc.y) * mc.z - 6}px) translate(-50%, -100%)`;
+  }
   // a plaque on each country's border: the project that holds it
   countries().forEach((c, i) => {
     const key = 'c:' + c.repo, e = el(key, 'countrycard'); seen.add(key);
@@ -1077,7 +1104,7 @@ function setWorld(m) {
   document.getElementById('zfit').textContent = m === 'city' ? 'City' : 'Center';
 }
 function enterCity(j) {
-  fadeTo(() => { const other = j !== cur; if (other) useJob(j); setWorld('city'); if (other) centerOn(CITY.x, CITY.y, cam.city); hud(); });
+  fadeTo(() => { const other = j !== cur; if (other) useJob(j); else if (setup !== j.st.setup) applySetup(j.st.setup); setWorld('city'); if (other) centerOn(CITY.x, CITY.y, cam.city); hud(); });
 }
 function showAegean() {
   fadeTo(() => { closeDrawer(); hidePop(); setWorld('aegean'); hud(); });
@@ -1144,6 +1171,15 @@ function overlay(s, now) {
 }
 
 // ---------- HUD, cost, thoughts ----------
+// what the world map shows, in one line, and what its signs mean
+function aegeanLine() {
+  const js = JOBS.filter(j => !j.lobby), projects = new Set(js.map(j => j.repo)).size;
+  const working = js.filter(j => j.live ? !['done', 'failed', 'interrupted', 'cancelled'].includes(j.live.state) : jobSetup(j) !== 'idle').length;
+  const waiting = js.filter(needsYou).length;
+  if (!js.length) return '<div class="line"><b>The Aegean</b> · No jobs yet. Each job you start becomes a city here.</div>';
+  return `<div class="line"><b>The Aegean</b> · ${projects} ${projects === 1 ? 'project' : 'projects'} as countries, ${js.length} ${js.length === 1 ? 'job' : 'jobs'} as cities: ${working} working${waiting ? `, <b>${waiting} ${waiting === 1 ? 'needs' : 'need'} you</b>` : ''}. Click a city to go in.</div>
+    <div class="line key">A gold ring around a city: the job waits for you. A boat sailing out: the job just shipped its commit, push or PR.</div>`;
+}
 function stepBar(k, cls) {
   const at = AT[k] ?? SETUPS[k]?.at, ix = STEPS.findIndex(s => s[0] === at), finished = k === 'idle' && JOBS.find(j => jobSetup(j) === k && j.i > 0);
   return STEPS.map(([id, name], i) => `<${cls} class="${i === ix ? 'now' : (i < ix || finished) ? 'done' : ''}" title="Step ${i + 1}: ${name}">${cls === 'span' ? name : ''}</${cls}>`).join('');
@@ -1155,7 +1191,7 @@ function hud() {
   const chips = JOBS.map((j, i) => `<button data-j="${i}" class="${mode === 'city' && j === cur ? 'on' : ''}${needsYou(j) ? ' askchip' : ''}">${j.city}<small>${needsYou(j) ? 'needs you' : SETUPS[jobSetup(j)].label}</small></button>`).join('');
   const h = document.getElementById('hud');
   const body = mode === 'aegean'
-    ? `<div class="line"><b>The Aegean</b> · ${JOBS.length} jobs running as ${JOBS.length} cities. Click a city to go there.</div>`
+    ? aegeanLine()
     : `<div class="track">${stepBar(setup, 'span')}</div><div class="line"><b>${cur.id}</b> ${cur.title} · ${SETUPS[setup].label}${jobAgents(cur) ? ` · ${jobAgents(cur)} agent${jobAgents(cur) > 1 ? 's' : ''}` : ''} · <code>${usd(jobCost(cur))}</code>${LIVE ? '' : ` · discoveries ${nf}/${nl}`}</div>`;
   const min = hudMin();
   h.classList.toggle('min', min);
@@ -1278,7 +1314,7 @@ document.getElementById('play').onclick = () => {
   if (playing) return stopPlay();
   document.getElementById('play').classList.add('on');
   playing = setInterval(() => {
-    for (const j of JOBS) { j.i = (j.i + 1) % JOB.length; if (j === cur) applySetup(JOB[j.i]); else { const keep = procs; procs = j.st.procs; startRuns(JOB[j.i]); procs = keep; j.st.setup = JOB[j.i]; narrate(NARR[JOB[j.i]], j); } }
+    for (const j of JOBS) { j.i = (j.i + 1) % JOB.length; if (JOB[j.i] === 'ship') sail(j, 'pull request'); if (j === cur) applySetup(JOB[j.i]); else { const keep = procs; procs = j.st.procs; startRuns(JOB[j.i]); procs = keep; j.st.setup = JOB[j.i]; narrate(NARR[JOB[j.i]], j); } }
     hud();
   }, 3400);
 };
@@ -1381,7 +1417,8 @@ const SIGNS = [
   ['fx/notes', 'Notes', 'The DJ is playing a set at the Theatre.'],
   ['fx/decks', 'DJ booth', 'Decks on the Theatre stage while a set plays.'],
   ['fx/scroll', 'Handoff', 'A handoff note on its way to the next station. Click it to read it.'],
-  ['bldg/trireme-sailing', 'Ship sailing', 'Work is going out as a commit, push or PR.'],
+  ['bldg/trireme-sailing', 'Ship sailing', 'In a city: the work is going out as a commit, push or PR.'],
+  ['map/boat', 'Boat at sea', 'On the world map: sails out from a city when its job ships, with what it carries written above it.'],
 ];
 // a thumbnail that fits in size×size: small art is enlarged by a whole
 // number, big art (buildings are drawn 2× now) is shrunk to fit
@@ -1646,9 +1683,9 @@ function onEvent(j, e) {
     case 'workspace.blocked_write': say(`Archimedes changed test files (${(d.files || []).join(', ')}). The engine undid it: agents don't edit tests.`); break;
     case 'human.message': say(`You sent Archimedes a message: "${d.text}".`); break;
     case 'ship.uncommitted': say(`Archimedes had committed on his own. The engine undid that commit and kept the changes, so it makes the one commit itself.`); break;
-    case 'job.pushed': say(`Pushed ${code(d.branch)} to origin.`, 'ship'); break;
-    case 'job.pr_opened': j.pr = d.url; say(`Pull request opened: ${d.url}`, 'ship'); break;
-    case 'job.committed': say(`Committed ${code(d.sha)} on ${code(d.branch)}. The ship sails with the work.`, 'ship');
+    case 'job.pushed': if (!old) sail(j, 'push'); say(`Pushed ${code(d.branch)} to origin. A boat leaves ${j.city} with it.`, 'ship'); break;
+    case 'job.pr_opened': j.pr = d.url; if (!old) sail(j, 'pull request'); say(`Pull request opened: ${d.url}`, 'ship'); break;
+    case 'job.committed': if (!old) sail(j, 'commit ' + d.sha); say(`Committed ${code(d.sha)} on ${code(d.branch)}. The ship sails with the work.`, 'ship');
       if (!old) { L.shipping = true; refresh(j, true); setTimeout(() => { L.shipping = false; refresh(j, true); }, 16000); return; } break;
     case 'job.cancelled': L.state = 'cancelled'; L.stuck = null; clearAlarm(j);
       say(`You stopped ${j.id}. Its agents went home; the work so far stays on ${code(d.branch || 'its branch')}.`); refresh(j, true); return;
