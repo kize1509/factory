@@ -151,14 +151,14 @@ type Limits struct {
 }
 
 // RoleNames lists the roles in pipeline order.
-var RoleNames = []string{"scheduler", "ops", "researcher", "planner", "builder", "executor", "reviewer", "humanizer", "finalizer"}
+var RoleNames = []string{"product", "scheduler", "ops", "researcher", "planner", "builder", "executor", "reviewer", "humanizer", "finalizer"}
 
 // DefaultRoles follows D29 and D31: Pi everywhere, the Claude model of
 // each role's tier.
 func DefaultRoles() map[string]Role {
 	think, code, execute := "anthropic/claude-opus-5-5", "anthropic/claude-sonnet-5-5", "anthropic/claude-haiku-5-5"
 	return map[string]Role{
-		"scheduler": {"pi", think}, "planner": {"pi", think}, "reviewer": {"pi", think},
+		"product": {"pi", think}, "scheduler": {"pi", think}, "planner": {"pi", think}, "reviewer": {"pi", think},
 		"researcher": {"pi", code}, "builder": {"pi", code}, "humanizer": {"pi", code},
 		"executor": {"pi", execute}, "finalizer": {"pi", execute},
 		"ops": {"pi", "openai/gpt-6.1-terra"}, // Hermes, the operations agent (D2, D29)

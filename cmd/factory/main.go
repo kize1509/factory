@@ -2,6 +2,7 @@
 //
 //	factory init            add factory.yml and ignore .factory/ in this repo
 //	factory serve [flags]   start the engine and the web interface
+//	factory triage [flags] [repo]   let the product agent go over the repo's board
 //	factory test replay|results <run> [--json]   reproduce or read a recorded run (docs/TESTING.md)
 package main
 
@@ -26,7 +27,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: factory init | factory serve [-port 7777]")
+		fmt.Fprintln(os.Stderr, "usage: factory init | factory serve [-port 7777] | factory triage [-project HF] [repo]")
 		os.Exit(2)
 	}
 	switch os.Args[1] {
@@ -36,6 +37,8 @@ func main() {
 		serve(os.Args[2:])
 	case "test":
 		os.Exit(testCmd(os.Args[2:]))
+	case "triage":
+		os.Exit(triageCmd(os.Args[2:]))
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command %q\n", os.Args[1])
 		os.Exit(2)

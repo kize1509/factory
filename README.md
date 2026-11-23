@@ -28,3 +28,5 @@ factory serve
 Open http://localhost:7777 for the map and http://localhost:7777/admin.html to add your YouTrack URL and token and pick models per role.
 
 In each repo you want Factory to work on, run `factory init`. It writes `factory.yml` and adds `.factory/` to `.gitignore`.
+
+To have the product agent go over a repo's board, asking owners, fixing tickets and starting jobs on the ready ones, run `factory triage -project HF` in that repo while the engine runs. See `docs/TRIAGE.md`.
