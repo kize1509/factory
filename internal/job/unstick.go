@@ -63,6 +63,10 @@ func (j *Job) actions(phase string, repeats int) []Action {
 		out = append(out, Action{ID: "commit_anyway", Label: "Commit it as it is", Hint: "Skips the checks and review that are left and commits the work as it stands, then ships it.",
 			Confirm: "The checks or the review haven't passed. Commit the work as it is anyway?"})
 	}
+	// every stuck job can end as done, for work that needs no commit (an
+	// analysis, a question answered) or that you finish yourself
+	out = append(out, Action{ID: "complete", Label: "Mark it done", Hint: "Ends the job as done without committing or shipping anything. Changes that aren't committed stay in the worktree.",
+		Confirm: "Finish the job as done without a commit or push?"})
 	return out
 }
 
@@ -130,6 +134,8 @@ func (j *Job) act(ctx context.Context, wt *workspace.Worktree, r *Resume) (*work
 		j.emit("", "ship.new_branch", map[string]any{"branch": name})
 	case "force_push":
 		j.force = true
+	case "complete":
+		return work, j.finishNoChanges("you marked it done")
 	case "commit_anyway":
 		j.emit("", "ship.forced", map[string]any{"phase": r.Phase})
 		if a != nil && j.cwd[j.lead] != work.Path {
@@ -205,8 +211,8 @@ func (j *Job) repair(ctx context.Context, wt *workspace.Worktree, r *Resume) (*w
 	if err != nil {
 		return wt, err
 	}
-	if head == j.base {
-		return wt, fmt.Errorf("nothing to ship: %s has no commit past the job's base", wt.Branch)
+	if head == j.base { // the repair left nothing to commit: done, with no code changes
+		return wt, j.finishNoChanges("nothing to commit after the repair")
 	}
 	return wt, j.shipCommitted(wt, head)
 }

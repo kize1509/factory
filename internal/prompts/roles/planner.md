@@ -19,3 +19,7 @@ When you need a person:
 - Ask too when the same thing has failed twice and you don't know why. Say what you're stuck on and what you would try.
 - Keep it short. need is one sentence that starts with what you need ("I need the Stripe test key", "I'm stuck on the login check: should I mock the clock or raise the timeout?"). why is one or two sentences. Don't recap the task or list what you did.
 - Then end your turn. The answer comes as your next message.
+
+Problems outside this ticket:
+- When you find something broken that this ticket doesn't cover (a bug, a failing or flaky test, dead code, a wrong doc, a security hole), don't fix it here. Ask Hermes with ask_ops to file a ticket for it: what is wrong, where (file and line), how to see it, and what done looks like. Hermes searches for a duplicate first and tells you the ticket ID.
+- Tell Hermes with report about decisions and findings the factory should remember, and blockers you hit.

@@ -297,13 +297,48 @@ func TestBoardSyncNeverFailsTheJob(t *testing.T) {
 	if eventTypes(bus, "J7")["tracker.skipped"] != 1 {
 		t.Fatalf("%v", eventTypes(bus, "J7"))
 	}
-	// no tracker block: nothing happens
+	// no tracker block and no ticket: nothing to move
 	bare := t.TempDir()
-	s.Register("J8", bare, "HF-9", "commit", "", false)
+	s.Register("J8", bare, "", "commit", "", false)
 	s.Observe(events.Event{Job: "J8", Type: "job.state", Data: map[string]any{"state": "building"}})
 	s.Wait("J8")
 	if len(eventTypes(bus, "J8")) != 0 {
-		t.Fatal("without a tracker block board sync is off")
+		t.Fatal("without a tracker block or a ticket board sync is off")
+	}
+}
+
+// A repo without a tracker block still gets its board moved: the job's
+// ticket says which project, and a job that changed nothing says so.
+func TestBoardSyncFromTicketWithoutTrackerBlock(t *testing.T) {
+	s, yt, _, _ := setup(t, "fix")
+	bare := t.TempDir()
+	sc := s.Register("J10", bare, "HF-9", "pr", "", false)
+	if !sc.Enabled() || sc.Tracker.Project != "HF" {
+		t.Fatalf("tracker %+v", sc.Tracker)
+	}
+	for _, st := range []string{"planning", "building", "reviewing", "committing"} {
+		s.Observe(events.Event{Job: "J10", Type: "job.state", Data: map[string]any{"state": st}})
+	}
+	s.Observe(events.Event{Job: "J10", Type: "job.no_changes", Data: map[string]any{"did": "the cache is never cleared on logout"}})
+	s.Observe(events.Event{Job: "J10", Type: "job.state", Data: map[string]any{"state": "done"}})
+	s.Wait("J10")
+	var moves []string
+	for _, c := range yt.cmds() {
+		moves = append(moves, strings.TrimPrefix(c, "HF-9: State "))
+	}
+	// no PR was opened, so there is nothing to review: done is done
+	if want := "{In Progress}|Done"; strings.Join(moves, "|") != want {
+		t.Fatalf("moves %v, want %s", moves, want)
+	}
+	s.Register("J11", bare, "HF-10", "commit", "", false)
+	s.Observe(events.Event{Job: "J11", Type: "job.no_changes", Data: map[string]any{"did": "the cache is never cleared on logout"}})
+	s.Observe(events.Event{Job: "J11", Type: "job.state", Data: map[string]any{"state": "done"}})
+	s.Wait("J11")
+	if c := yt.cmds(); c[len(c)-1] != "HF-10: State Done" {
+		t.Fatalf("commands %v", c)
+	}
+	if n := len(yt.comments); n == 0 || !strings.Contains(yt.comments[n-1], "no code changes") || !strings.Contains(yt.comments[n-1], "cache is never cleared") {
+		t.Fatalf("comments %v", yt.comments)
 	}
 }
 
