@@ -73,6 +73,7 @@ type Scope struct {
 	commit   string
 	branch   string
 	pr       string
+	noChange string // what the job did, when it finished without a commit
 }
 
 type output struct {
@@ -143,6 +144,11 @@ func (s *Service) Register(id, repo, issue, ship, level string, pass bool) *Scop
 	if p, err := config.LoadProject(repo); err == nil {
 		tr = p.Tracker
 	}
+	if tr.Kind == "" && issueRe.MatchString(issue) {
+		if _, err := s.client(); err == nil {
+			tr = fromTicket(issue)
+		}
+	}
 	tr = tr.Normalised()
 	if l := config.ValidLevel(level); l != "" {
 		tr.Level = l
@@ -165,6 +171,17 @@ func (s *Service) Register(id, repo, issue, ship, level string, pass bool) *Scop
 		go s.poll(ctx, sc)
 	}
 	return sc
+}
+
+// fromTicket is the tracker for a job whose repo has no tracker block in
+// factory.yml: the project the job's ticket is in, with the states YouTrack
+// projects start with. Without it the board never moves for a ticket the
+// factory was started from.
+func fromTicket(issue string) config.Tracker {
+	project, _, _ := strings.Cut(issue, "-")
+	tr := config.Tracker{Kind: "youtrack", Project: strings.ToUpper(project)}
+	tr.States.Working, tr.States.Done = "In Progress", "Done"
+	return tr
 }
 
 func (s *Service) scope(id string) *Scope {

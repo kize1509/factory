@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"factory/internal/events"
+	"factory/internal/handoff"
 	"factory/internal/runtime"
 )
 
@@ -119,7 +120,7 @@ func TestShipFailureRepeatsAndWayOut(t *testing.T) {
 	if st := l.settle(1); st != "stuck" {
 		t.Fatalf("state %s, want stuck on the PR", st)
 	}
-	if got := actionIDs(l.j.Actions); got != "retry,skip_pr,new_branch,force_push,commit_only" {
+	if got := actionIDs(l.j.Actions); got != "retry,skip_pr,new_branch,force_push,commit_only,complete" {
 		t.Fatalf("actions %s", got)
 	}
 	pushed := gitOut(t, remote, "rev-parse", "factory/U1")
@@ -264,5 +265,74 @@ func TestSameFailureIgnoresHashes(t *testing.T) {
 	}
 	if sameFailure("push rejected", "gh pr create failed") {
 		t.Fatal("different failures")
+	}
+}
+
+// readingRT plays an agent that only reads and reports: it changes no files.
+type readingRT struct{ job *Job }
+
+func (f *readingRT) setJob(j *Job) { f.job = j }
+func (f *readingRT) Start(_ context.Context, s runtime.AgentSpec) (runtime.Agent, error) {
+	return &readingAgent{rt: f}, nil
+}
+
+type readingAgent struct{ rt *readingRT }
+
+func (a *readingAgent) Prompt(_ context.Context, text string) (string, error) {
+	a.rt.job.SaveHandoff(builder, &handoff.Note{From: builder, To: "reviewers", Did: "the cache is never invalidated on logout", Next: "nothing"})
+	return "ok", nil
+}
+func (a *readingAgent) Steer(string) error { return nil }
+func (a *readingAgent) Stop() error        { return nil }
+
+// Work that changes no files (an analysis, a question answered) is done,
+// not stuck on "nothing to commit", in every ship mode.
+func TestNoChangesFinishesDone(t *testing.T) {
+	for _, ship := range []string{"commit", "pr"} {
+		t.Run(ship, func(t *testing.T) {
+			failingGH(t) // a PR would fail: nothing may try to open one
+			repo, _ := withOrigin(t)
+			l := start(t, Spec{Ship: ship, ID: "N1", Title: "look into the cache", Repo: repo, Prompt: "find out why"}, &readingRT{})
+			if st := l.settle(1); st != "done" {
+				t.Fatalf("state %s error %q", st, l.j.Error)
+			}
+			if l.j.Commit != "" || l.j.PR != "" {
+				t.Fatalf("commit %q pr %q, want neither", l.j.Commit, l.j.PR)
+			}
+			log, _ := l.bus.ReplayFile(l.j.ID)
+			var saw bool
+			for _, e := range log {
+				if e.Type == "job.no_changes" && e.Data["did"] == "the cache is never invalidated on logout" {
+					saw = true
+				}
+				if e.Type == "job.committed" || e.Type == "job.pushed" {
+					t.Errorf("unexpected %s", e.Type)
+				}
+			}
+			if !saw {
+				t.Error("missing job.no_changes with the handoff summary")
+			}
+		})
+	}
+}
+
+// Any stuck job can be marked done without a commit.
+func TestMarkItDone(t *testing.T) {
+	repo := gitRepo(t)
+	rt := &stuckRT{}
+	bus := events.NewBus(t.TempDir())
+	j := New(Spec{ID: "U5", Title: "make app", Repo: repo, Prompt: "write done", Checks: []string{"grep -q '^done$' app.txt"}, MaxLoops: 1}, bus, rt)
+	rt.job = j
+	bus.Place(j.ID, j.Dir())
+	ctx, stop := context.WithCancel(context.Background())
+	l := &live{t: t, j: j, bus: bus, stop: stop, done: make(chan struct{})}
+	go func() { j.Run(ctx); close(l.done) }()
+	t.Cleanup(func() { stop(); <-l.done })
+	if st := l.settle(1); st != "stuck" || !strings.Contains(actionIDs(j.Actions), "complete") {
+		t.Fatalf("state %s actions %s", st, actionIDs(j.Actions))
+	}
+	l.nudge("", "complete")
+	if st := l.settle(2); st != "done" || j.Commit != "" {
+		t.Fatalf("state %s commit %q error %q", st, j.Commit, j.Error)
 	}
 }

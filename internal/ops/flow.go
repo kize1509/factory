@@ -285,7 +285,7 @@ func (s *Service) Ask(scopeID, from, question string) (string, error) {
 	if notes, _ := s.Store.Notes(sc.Repo, "", "", words(question), 12); len(notes) > 0 {
 		known = "\n\nNotes that may help:\n" + formatNotes(notes)
 	}
-	out, text, err := s.turn(sc, from, fmt.Sprintf("%s asks you (job %s, ticket %s):\n\n%s%s\n\nLook it up with your tools if the notes don't settle it, then call answer with a short reply and its sources (issue IDs, job, agent, event #).",
+	out, text, err := s.turn(sc, from, fmt.Sprintf("%s asks you (job %s, ticket %s):\n\n%s%s\n\nLook it up with your tools if the notes don't settle it, then call answer with a short reply and its sources (issue IDs, job, agent, event #). If they ask you to file, update or move a ticket, do it with your tracker tools (search for a duplicate first) and say in the answer what happened.",
 		from, sc.ID, orNone(sc.Issue), question, known))
 	if err != nil {
 		return "", err
@@ -549,6 +549,13 @@ func (s *Service) Observe(e events.Event) {
 		sc.mu.Lock()
 		sc.commit, sc.branch = str(e.Data, "sha"), str(e.Data, "branch")
 		sc.mu.Unlock()
+	case "job.no_changes":
+		sc.mu.Lock()
+		sc.noChange = str(e.Data, "did")
+		if sc.noChange == "" {
+			sc.noChange = str(e.Data, "reason")
+		}
+		sc.mu.Unlock()
 	case "job.pr_opened":
 		sc.mu.Lock()
 		sc.pr = str(e.Data, "url")
@@ -574,8 +581,11 @@ func (s *Service) boardSync(sc *Scope, state string) {
 		to = sc.Tracker.States.Review
 	case "done":
 		to = sc.Tracker.States.Done
-		if sc.Ship == "pr" {
-			to = sc.Tracker.States.Review
+		sc.mu.Lock()
+		opened := sc.pr != ""
+		sc.mu.Unlock()
+		if sc.Ship == "pr" && opened && sc.Tracker.States.Review != "" {
+			to = sc.Tracker.States.Review // the PR still needs a person; no PR, nothing to review
 		}
 	default:
 		return
@@ -587,7 +597,7 @@ func (s *Service) boardSync(sc *Scope, state string) {
 		sc.mu.Lock()
 		same := sc.lastMove == to && state != "done"
 		sc.lastMove = to
-		commit, branch, pr := sc.commit, sc.branch, sc.pr
+		commit, branch, pr, noChange := sc.commit, sc.branch, sc.pr, sc.noChange
 		sc.mu.Unlock()
 		if same {
 			return
@@ -601,8 +611,13 @@ func (s *Service) boardSync(sc *Scope, state string) {
 		}
 		if state == "done" {
 			text := fmt.Sprintf("Job %s finished. Commit %s on branch %s.", sc.ID, commit, branch)
-			if pr != "" {
+			switch {
+			case pr != "":
 				text = fmt.Sprintf("Job %s finished. Pull request: %s", sc.ID, pr)
+			case commit == "" && noChange != "":
+				text = fmt.Sprintf("Job %s finished with no code changes.\n\n%s", sc.ID, noChange)
+			case commit == "":
+				text = fmt.Sprintf("Job %s finished with no code changes.", sc.ID)
 			}
 			if _, err := s.Write(sc, Hermes, Action{Kind: "comment", Issue: sc.Issue, Text: text}); err != nil {
 				skip(err)

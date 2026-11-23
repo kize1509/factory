@@ -651,6 +651,12 @@ func (j *Job) commit(wt, work *workspace.Worktree, a runtime.Agent) error {
 		}
 	}
 	j.set("committing")
+	if work == wt && wt.IsClean() {
+		if head, _ := wt.Head(); head == j.base {
+			// analysis, a check, a question answered: work that changes no files is still done
+			return j.finishNoChanges("the work changed no files")
+		}
+	}
 	if _, err := work.Commit(fmt.Sprintf("%s: %s", j.ID, j.Title)); err != nil && work == wt {
 		return err
 	}
@@ -668,7 +674,27 @@ func (j *Job) commit(wt, work *workspace.Worktree, a runtime.Agent) error {
 	if err != nil {
 		return err
 	}
+	if sha == j.base { // the winning experiment changed nothing either
+		return j.finishNoChanges("the work changed no files")
+	}
 	return j.shipCommitted(wt, sha)
+}
+
+// finishNoChanges ends a job as done without a commit: there is nothing to
+// commit or ship, or you said to finish it as it is. Uncommitted changes, if
+// any, stay in the worktree.
+func (j *Job) finishNoChanges(why string) error {
+	j.mu.Lock()
+	j.Commit = ""
+	did := ""
+	if n := j.handoffs[j.lead]; n != nil {
+		did = n.Did
+	}
+	j.mu.Unlock()
+	j.emit("", "job.no_changes", map[string]any{"reason": why, "did": did, "branch": j.Branch})
+	j.set("done")
+	j.emit("", "job.done", map[string]any{"no_changes": true, "did": did})
+	return nil
 }
 
 // shipCommitted records the job's commit, ships it and marks the job done.
