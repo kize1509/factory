@@ -42,10 +42,25 @@ func (j *Job) actions(phase string, repeats int) []Action {
 	retry := Action{ID: "retry", Label: "Try again", Hint: "Runs the step again as it is. Pushing fetches origin and rebases onto it first."}
 	switch {
 	case shipPhase(phase):
-		if repeats == 0 {
+		noRemote := phase == "shipping" && !workspace.HasOrigin(j.Repo)
+		if repeats == 0 && !noRemote { // trying again can't make a remote appear
 			out = append(out, retry)
 		}
-		if phase == "shipping" {
+		if noRemote {
+			// nowhere to push: make a remote, or keep the work here
+			who := "your active gh account"
+			if accts, err := workspace.GitHubAccounts(); err == nil {
+				for _, a := range accts {
+					if a.Active {
+						who = a.Login
+					}
+				}
+			}
+			out = append(out,
+				Action{ID: "create_remote", Label: "Create a GitHub repository and push", Hint: fmt.Sprintf("Creates a private repository %s/%s as %s, makes it origin and ships there.", who, filepath.Base(j.Repo), who),
+					Confirm: fmt.Sprintf("Create the private GitHub repository %s/%s and push the work to it?", who, filepath.Base(j.Repo))},
+				Action{ID: "commit_only", Label: "Keep the commit, ship nothing", Hint: "Finishes the job with the local commit on " + j.Branch + ". Nothing leaves this machine."})
+		} else if phase == "shipping" {
 			branch := j.Branch
 			if j.pushTo != "" {
 				branch = j.pushTo
@@ -125,6 +140,21 @@ func (j *Job) act(ctx context.Context, wt *workspace.Worktree, r *Resume) (*work
 		j.Ship = "push"
 	case "commit_only":
 		j.Ship = "commit"
+	case "create_remote":
+		accts, err := workspace.GitHubAccounts()
+		if err != nil {
+			return wt, err
+		}
+		as := accts[0].Login
+		for _, a := range accts {
+			if a.Active {
+				as = a.Login
+			}
+		}
+		j.NewRemote = &workspace.NewRemote{As: as}
+		if j.Ship == "commit" || j.Ship == "" {
+			j.Ship = "push"
+		}
 	case "new_branch":
 		name, err := wt.FreeBranch()
 		if err != nil {
