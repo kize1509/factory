@@ -43,8 +43,30 @@ type Service struct {
 	// PollEvery is how often a job's ticket is checked for new comments.
 	PollEvery time.Duration
 
-	mu     sync.Mutex
-	scopes map[string]*Scope
+	mu      sync.Mutex
+	scopes  map[string]*Scope
+	touched map[string]time.Time // when the factory last wrote to each ticket
+}
+
+// Touched is when the factory last changed the ticket, zero when it hasn't
+// since the engine started. A ticket updated later than this was changed
+// by a person.
+func (s *Service) Touched(issue string) time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.touched[strings.ToUpper(issue)]
+}
+
+func (s *Service) touch(issue string) {
+	if issue == "" {
+		return
+	}
+	s.mu.Lock()
+	if s.touched == nil {
+		s.touched = map[string]time.Time{}
+	}
+	s.touched[strings.ToUpper(issue)] = time.Now()
+	s.mu.Unlock()
 }
 
 // Scope is one job or pass the operations agent works for.
@@ -521,6 +543,7 @@ func (s *Service) execute(sc *Scope, agent string, a Action) (issue, msg string,
 	if err != nil {
 		return "", "", err
 	}
+	defer func() { s.touch(issue) }()
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	data := func(typ string, extra map[string]any) {

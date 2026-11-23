@@ -5,15 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
 	"factory/internal/config"
 	"factory/internal/job"
 	"factory/internal/triage"
+	"factory/internal/youtrack"
 )
 
 // Triage runs: the product agent (Pericles) goes over one repo's board,
@@ -23,6 +22,8 @@ import (
 func (s *Server) triageRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/triage", s.startTriage)
 	mux.HandleFunc("GET /api/triage", s.listTriage)
+	mux.HandleFunc("GET /api/triage/boards", s.boards)
+	mux.HandleFunc("PUT /api/triage/auto", s.putAuto)
 	mux.HandleFunc("GET /api/triage/{run}", s.getTriage)
 	mux.HandleFunc("POST /api/triage/{run}/stop", s.stopTriage)
 }
@@ -79,51 +80,72 @@ func (s *Server) liveJobs(repo string) []triage.LiveJob {
 	return out
 }
 
+// triageOpts is what a run is started with, from the Board panel or the
+// automatic schedule.
+type triageOpts struct {
+	Repo    string  `json:"repo"`
+	Project string  `json:"project"`  // the YouTrack project, when factory.yml has no tracker block
+	Level   string  `json:"level"`    // observe, propose, file or fix; default the tracker's level
+	MaxJobs *int    `json:"max_jobs"` // jobs it may start; default 2, 0 only recommends
+	Minutes float64 `json:"minutes"`  // how long it may take; default 30
+	Focus   string  `json:"focus"`    // what to look at first, in your words
+	auto    bool
+	why     string
+}
+
 func (s *Server) startTriage(w http.ResponseWriter, r *http.Request) {
-	var b struct {
-		Repo    string  `json:"repo"`
-		Project string  `json:"project"`  // the YouTrack project, when factory.yml has no tracker block
-		Level   string  `json:"level"`    // observe, propose, file or fix; default the tracker's level
-		MaxJobs *int    `json:"max_jobs"` // jobs it may start; default 2, 0 only recommends
-		Minutes float64 `json:"minutes"`  // how long it may take; default 30
-		Focus   string  `json:"focus"`    // what to look at first, in your words
-	}
+	var b triageOpts
 	if err := json.NewDecoder(r.Body).Decode(&b); err != nil || b.Repo == "" {
-		http.Error(w, "need a repo", http.StatusBadRequest)
+		http.Error(w, "pick a repository", http.StatusBadRequest)
 		return
 	}
-	if s.Ops == nil {
-		http.Error(w, "the operations service is not running", http.StatusServiceUnavailable)
-		return
-	}
-	repo, err := repoRoot(b.Repo)
+	b.why = "you started it"
+	run, code, err := s.beginTriage(b)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, err.Error(), code)
 		return
 	}
+	writeJSON(w, map[string]any{"id": run.ID, "project": run.Project, "level": run.Level, "max_jobs": run.MaxJobs})
+}
+
+// boardProject is the YouTrack project for repo: factory.yml's tracker
+// block, else the one given. It says why when there is none.
+func boardProject(repo, given string) (config.Tracker, string, error) {
 	proj, err := config.LoadProject(repo)
 	if err != nil {
-		http.Error(w, "factory.yml: "+err.Error(), http.StatusBadRequest)
-		return
+		return config.Tracker{}, "", fmt.Errorf("factory.yml: %w", err)
 	}
 	tr := proj.Tracker.Normalised()
-	project := strings.ToUpper(strings.TrimSpace(b.Project))
+	project := strings.ToUpper(strings.TrimSpace(given))
 	if strings.EqualFold(tr.Kind, "youtrack") && tr.Project != "" {
 		if project != "" && !strings.EqualFold(project, tr.Project) {
-			http.Error(w, fmt.Sprintf("factory.yml maps this repo to %s, not %s", tr.Project, project), http.StatusBadRequest)
-			return
+			return tr, "", fmt.Errorf("factory.yml maps this repo to %s, not %s", tr.Project, project)
 		}
 		project = tr.Project
 	}
 	if project == "" {
-		http.Error(w, "which YouTrack project is this repo's board? Pass project, or add a tracker block to factory.yml", http.StatusBadRequest)
-		return
+		return tr, "", fmt.Errorf("which YouTrack project is this repo's board? Give its short name, like HF")
+	}
+	return tr, project, nil
+}
+
+// beginTriage checks the options and starts a run in the background.
+func (s *Server) beginTriage(b triageOpts) (*triage.Run, int, error) {
+	if s.Ops == nil {
+		return nil, http.StatusServiceUnavailable, fmt.Errorf("the operations service is not running")
+	}
+	repo, err := repoRoot(b.Repo)
+	if err != nil {
+		return nil, http.StatusBadRequest, err
+	}
+	tr, project, err := boardProject(repo, b.Project)
+	if err != nil {
+		return nil, http.StatusBadRequest, err
 	}
 	level := tr.Level
 	if b.Level != "" {
 		if level = config.ValidLevel(b.Level); level == "" {
-			http.Error(w, "level is observe, propose, file or fix", http.StatusBadRequest)
-			return
+			return nil, http.StatusBadRequest, fmt.Errorf("level is observe, propose, file or fix")
 		}
 	}
 	maxJobs := 2
@@ -131,23 +153,23 @@ func (s *Server) startTriage(w http.ResponseWriter, r *http.Request) {
 		maxJobs = *b.MaxJobs
 	}
 	if maxJobs < 0 || maxJobs > 10 {
-		http.Error(w, "max_jobs is 0 to 10", http.StatusBadRequest)
-		return
+		return nil, http.StatusBadRequest, fmt.Errorf("it may start 0 to 10 jobs")
 	}
 	settings := config.LoadEngine()
+	if !(youtrack.Client{URL: settings.YouTrack.URL, Token: settings.YouTrack.Token}).Configured() {
+		return nil, http.StatusBadRequest, fmt.Errorf("YouTrack is not set up yet (Admin → Connections)")
+	}
 	role := settings.RoleForProject(repo, "product")
 	if p := config.CheckRole(role); p != "" {
-		http.Error(w, "product role: "+p, http.StatusBadRequest)
-		return
+		return nil, http.StatusBadRequest, fmt.Errorf("product role: %s", p)
 	}
 	rt := s.Runtimes[role.Runtime]
 	if rt == nil {
-		http.Error(w, "no runtime "+role.Runtime, http.StatusBadRequest)
-		return
+		return nil, http.StatusBadRequest, fmt.Errorf("no runtime %s", role.Runtime)
 	}
 
 	id := fmt.Sprintf("T%d", time.Now().UnixMilli())
-	run := &triage.Run{ID: id, Repo: repo, Project: project, Level: level, MaxJobs: maxJobs, Focus: strings.TrimSpace(b.Focus),
+	run := &triage.Run{ID: id, Repo: repo, Project: project, Level: level, MaxJobs: maxJobs, Focus: strings.TrimSpace(b.Focus), Auto: b.auto, Why: b.why,
 		Time: time.Duration(b.Minutes * float64(time.Minute)), RT: rt, Model: role.Model, Ops: s.Ops, Bus: s.Bus,
 		Dir:  filepath.Join(config.Home(), "triage", id),
 		Live: func() []triage.LiveJob { return s.liveJobs(repo) },
@@ -165,8 +187,7 @@ func (s *Server) startTriage(w http.ResponseWriter, r *http.Request) {
 	for _, other := range s.triage {
 		if other.Repo == repo && other.StateNow() == triage.Running {
 			s.mu.Unlock()
-			http.Error(w, "triage run "+other.ID+" is already going over this board", http.StatusConflict)
-			return
+			return nil, http.StatusConflict, fmt.Errorf("Pericles is already going over this board (run %s)", other.ID)
 		}
 	}
 	s.triage[id] = run
@@ -177,7 +198,7 @@ func (s *Server) startTriage(w http.ResponseWriter, r *http.Request) {
 		defer s.Ops.Close(run.Scope())
 		run.Execute(context.Background())
 	}()
-	writeJSON(w, map[string]any{"id": id, "project": project, "level": level, "max_jobs": maxJobs})
+	return run, http.StatusOK, nil
 }
 
 func (s *Server) triageRun(w http.ResponseWriter, id string) *triage.Run {
@@ -190,44 +211,24 @@ func (s *Server) triageRun(w http.ResponseWriter, id string) *triage.Run {
 	return run
 }
 
-// getTriage shows a run: live while it runs, from its run.json after a restart.
+// getTriage shows one run, live while it runs.
 func (s *Server) getTriage(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("run")
-	s.mu.Lock()
-	run := s.triage[id]
-	s.mu.Unlock()
-	w.Header().Set("Content-Type", "application/json")
-	if run != nil {
+	if run := s.triageRun(w, r.PathValue("run")); run != nil {
+		w.Header().Set("Content-Type", "application/json")
 		w.Write(run.Snapshot())
-		return
 	}
-	if strings.ContainsAny(id, `/\.`) {
-		http.Error(w, "no triage run "+id, http.StatusNotFound)
-		return
-	}
-	data, err := os.ReadFile(filepath.Join(config.Home(), "triage", id, "run.json"))
-	if err != nil {
-		http.Error(w, "no triage run "+id, http.StatusNotFound)
-		return
-	}
-	w.Write(data)
 }
 
-// listTriage lists the runs this server has started, newest first.
+// listTriage lists the runs, newest first; ?repo= keeps one repo's.
 func (s *Server) listTriage(w http.ResponseWriter, r *http.Request) {
-	s.mu.Lock()
-	list := make([]json.RawMessage, 0, len(s.triage))
-	ids := make([]string, 0, len(s.triage))
-	for id := range s.triage {
-		ids = append(ids, id)
+	repo := r.URL.Query().Get("repo")
+	if repo != "" {
+		if root, err := repoRoot(repo); err == nil {
+			repo = root
+		}
 	}
-	sort.Sort(sort.Reverse(sort.StringSlice(ids)))
-	runs := make([]*triage.Run, 0, len(ids))
-	for _, id := range ids {
-		runs = append(runs, s.triage[id])
-	}
-	s.mu.Unlock()
-	for _, run := range runs {
+	list := []json.RawMessage{}
+	for _, run := range s.runsFor(repo) {
 		list = append(list, run.Snapshot())
 	}
 	writeJSON(w, map[string]any{"runs": list})

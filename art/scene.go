@@ -29,17 +29,17 @@ type Place struct {
 // number along the Sacred Way, the road the work follows from the Gates in
 // the west to the Harbour in the east.
 var workPlaces = []Place{
-	{ID: "oracle", Asset: "bldg/oracle", Name: "Oracle of Delphi", Step: "6", X: 456, Y: 46},
-	{ID: "council", Asset: "bldg/council", Name: "Council house", Step: "3", X: 178, Y: 124},
-	{ID: "library", Asset: "bldg/library", Name: "Library", Step: "2", X: 84, Y: 140},
-	{ID: "academy", Asset: "bldg/academy", Name: "Academy", Step: "4", X: 262, Y: 136},
+	{ID: "oracle", Asset: "bldg/oracle", Name: "Oracle of Delphi", Step: "4", X: 456, Y: 46},
+	{ID: "council", Asset: "bldg/council", Name: "Council house", X: 178, Y: 124},
+	{ID: "library", Asset: "bldg/library", Name: "Library", X: 84, Y: 140},
+	{ID: "academy", Asset: "bldg/academy", Name: "Academy", Step: "2", X: 262, Y: 136},
 	{ID: "theatre", Asset: "bldg/theatre", Name: "Theatre", X: 2, Y: 150},
-	{ID: "symposium", Asset: "bldg/symposium", Name: "Symposium", Step: "4b", X: 250, Y: 214},
+	{ID: "symposium", Asset: "bldg/symposium", Name: "Symposium", Step: "2b", X: 250, Y: 214},
 	{ID: "gates", Asset: "bldg/gates", Name: "The Gates", Step: "1", X: 8, Y: 236},
-	{ID: "workshop", Asset: "bldg/workshop", Name: "Workshop", Step: "5", X: 352, Y: 228},
+	{ID: "workshop", Asset: "bldg/workshop", Name: "Workshop", Step: "3", X: 352, Y: 228},
 	{ID: "agora", Asset: "bldg/agora", Name: "Agora", X: 140, Y: 244},
-	{ID: "areopagus", Asset: "bldg/areopagus", Name: "Areopagus", Step: "7", X: 448, Y: 240},
-	{ID: "harbour", Asset: "bldg/harbour", Name: "Harbour", Step: "8", X: 530, Y: 262},
+	{ID: "areopagus", Asset: "bldg/areopagus", Name: "Areopagus", Step: "5", X: 448, Y: 240},
+	{ID: "harbour", Asset: "bldg/harbour", Name: "Harbour", Step: "6", X: 530, Y: 262},
 }
 
 // landmarks, in world coordinates

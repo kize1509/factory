@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"factory/internal/config"
 	"factory/internal/events"
 	"factory/internal/ops"
 	"factory/internal/runtime"
@@ -110,10 +111,10 @@ func setup(t *testing.T, level string, maxJobs int, turns [][]call) (*Run, *scri
 func TestTriageAsksStartsAndReports(t *testing.T) {
 	run, rt, yt, started := setup(t, "fix", 1, [][]call{{
 		{"ask_owner", `{"issue":"HF-4","question":"Should the export include archived rows? I'd leave them out."}`},
-		{"start_job", `{"issue":"HF-3","why":"ready"}`},                         // a job is already on it
-		{"start_job", `{"issue":"OTHER-1","why":"ready"}`},                      // another project
+		{"start_job", `{"issue":"HF-3","why":"ready"}`},                          // a job is already on it
+		{"start_job", `{"issue":"OTHER-1","why":"ready"}`},                       // another project
 		{"start_job", `{"issue":"hf-5","why":"top priority","notes":"cart.go"}`}, // the one it may start
-		{"start_job", `{"issue":"HF-6","why":"also ready"}`},                    // over the limit
+		{"start_job", `{"issue":"HF-6","why":"also ready"}`},                     // over the limit
 	}, {
 		{"finish_triage", `{"summary":"asked about HF-4, started HF-5","ready":["HF-6"],"blocked":["HF-4: archived rows"]}`},
 	}})
@@ -168,5 +169,61 @@ func TestTriageNeedsAFinish(t *testing.T) {
 	run.Time = 5 * time.Second
 	if err := run.Execute(context.Background()); err == nil || run.State != Failed {
 		t.Fatalf("err %v state %s", err, run.State)
+	}
+}
+
+func TestDue(t *testing.T) {
+	now := time.Date(2026, 11, 23, 12, 0, 0, 0, time.UTC)
+	on := config.TriageAuto{On: true, MaxJobs: 2, OnBoard: true, OnAnswers: true, OnReady: true}
+	ended := func(ago time.Duration) *Run {
+		return &Run{State: Done, MaxJobs: 2, Started: now.Add(-ago - time.Minute), Ended: now.Add(-ago)}
+	}
+	changed := Signals{Changed: []string{"HF-9"}}
+	cases := []struct {
+		name  string
+		a     config.TriageAuto
+		last  *Run
+		today int
+		live  int
+		sig   Signals
+		want  string
+	}{
+		{"off", config.TriageAuto{}, nil, 0, 0, changed, ""},
+		{"first run", on, nil, 0, 0, Signals{}, "the first run"},
+		{"inside the gap", on, ended(10 * time.Minute), 0, 0, changed, ""},
+		{"daily cap", on, ended(2 * time.Hour), 6, 0, changed, ""},
+		{"nothing new", on, ended(2 * time.Hour), 0, 0, Signals{}, ""},
+		{"board changed", on, ended(2 * time.Hour), 0, 0, changed, "someone changed HF-9"},
+		{"answers first", on, ended(2 * time.Hour), 0, 0, Signals{Changed: []string{"HF-9"}, Answered: []string{"HF-4"}}, "the owner answered on HF-4"},
+		{"trigger not ticked", config.TriageAuto{On: true, OnAnswers: true}, ended(2 * time.Hour), 0, 0, changed, ""},
+	}
+	for _, c := range cases {
+		if got := Due(c.a, now, c.last, c.today, c.live, c.sig); !strings.HasPrefix(got, c.want) || (c.want == "") != (got == "") {
+			t.Errorf("%s: %q, want %q", c.name, got, c.want)
+		}
+	}
+	// ready tickets left because the run hit its limit: run again once its jobs are done
+	full := ended(2 * time.Hour)
+	full.Jobs = []Started{{Issue: "HF-1", Job: "HF-1"}, {Issue: "HF-2", Job: "HF-2"}}
+	full.Report = &Report{Summary: "s", Ready: []string{"HF-3"}}
+	if got := Due(on, now, full, 0, 1, Signals{}); got != "" {
+		t.Errorf("jobs still going: %q", got)
+	}
+	if got := Due(on, now, full, 0, 0, Signals{}); !strings.Contains(got, "left HF-3 ready") {
+		t.Errorf("jobs done: %q", got)
+	}
+	full.Jobs = full.Jobs[:1] // it didn't hit the limit, so it chose not to start HF-3
+	if got := Due(on, now, full, 0, 0, Signals{}); got != "" {
+		t.Errorf("below the limit: %q", got)
+	}
+}
+
+func TestLoadMarksAnInterruptedRunStopped(t *testing.T) {
+	dir := t.TempDir()
+	r := &Run{ID: "T9", Dir: dir, State: Running, Started: time.Now()}
+	r.save()
+	got, err := Load(dir)
+	if err != nil || got.ID != "T9" || got.State != Stopped || got.Error == "" {
+		t.Fatalf("%+v %v", got, err)
 	}
 }

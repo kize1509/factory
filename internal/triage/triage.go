@@ -46,9 +46,11 @@ type LiveJob struct {
 
 // Question is one question the product agent put to the ticket's owner.
 type Question struct {
-	Issue    string `json:"issue"`
-	Question string `json:"question"`
-	Posted   string `json:"posted"` // what happened to the comment on the ticket
+	Issue    string    `json:"issue"`
+	Question string    `json:"question"`
+	Posted   string    `json:"posted"` // what happened to the comment on the ticket
+	At       time.Time `json:"at"`
+	OnTicket bool      `json:"on_ticket"` // the comment went out
 }
 
 // Started is one job the product agent asked for.
@@ -75,6 +77,8 @@ type Run struct {
 	MaxJobs int           `json:"max_jobs"` // 0: start_job only recommends
 	Time    time.Duration `json:"-"`        // how long the run may take; default 30 minutes
 	Focus   string        `json:"focus,omitempty"`
+	Auto    bool          `json:"auto,omitempty"` // the engine started it on its own
+	Why     string        `json:"why,omitempty"`  // what made it start
 
 	RT    runtime.Runtime                           `json:"-"`
 	Model string                                    `json:"-"`
@@ -127,6 +131,27 @@ func (r *Run) StateNow() string {
 	return r.State
 }
 
+// Load reads a run back from its run.json. A run that was still going
+// when the engine stopped is marked stopped.
+func Load(dir string) (*Run, error) {
+	data, err := os.ReadFile(filepath.Join(dir, "run.json"))
+	if err != nil {
+		return nil, err
+	}
+	var r Run
+	if err := json.Unmarshal(data, &r); err != nil {
+		return nil, err
+	}
+	r.Dir = dir
+	if r.State == Running {
+		r.State, r.Error = Stopped, "the engine stopped while the run was going"
+		if r.Ended.IsZero() {
+			r.Ended = r.Started
+		}
+	}
+	return &r, nil
+}
+
 // Stop ends the run and its agent.
 func (r *Run) Stop() {
 	r.mu.Lock()
@@ -154,7 +179,7 @@ func (r *Run) Execute(parent context.Context) error {
 		r.Questions, r.Jobs = []Question{}, []Started{}
 	}
 	r.mu.Unlock()
-	r.emit("triage.started", map[string]any{"repo": r.Repo, "project": r.Project, "level": r.Level, "max_jobs": r.MaxJobs})
+	r.emit("triage.started", map[string]any{"repo": r.Repo, "project": r.Project, "level": r.Level, "max_jobs": r.MaxJobs, "auto": r.Auto, "why": r.Why})
 	r.save()
 
 	err := r.converse(ctx)
@@ -319,7 +344,7 @@ func (r *Run) askOwner(issue, question string) (string, error) {
 	if issue == "" || question == "" {
 		return "", fmt.Errorf("ask_owner needs the ticket and the question")
 	}
-	posted := "not posted"
+	posted, sent := "not posted", false
 	reply := ""
 	if r.Ops != nil {
 		if sc := r.Ops.Scope(r.Scope()); sc != nil {
@@ -327,7 +352,7 @@ func (r *Run) askOwner(issue, question string) (string, error) {
 			if err != nil {
 				posted, reply = "refused: "+err.Error(), "The comment didn't go out ("+err.Error()+"). The question is kept in the run's report for the person running the factory."
 			} else {
-				posted, reply = msg, msg+". The owner answers on the ticket; a later run reads the answer."
+				posted, sent, reply = msg, !strings.Contains(msg, "draft"), msg+". The owner answers on the ticket; a later run reads the answer."
 			}
 		}
 	}
@@ -335,7 +360,7 @@ func (r *Run) askOwner(issue, question string) (string, error) {
 		reply = "Recorded for the person running the factory."
 	}
 	r.mu.Lock()
-	r.Questions = append(r.Questions, Question{Issue: issue, Question: question, Posted: posted})
+	r.Questions = append(r.Questions, Question{Issue: issue, Question: question, Posted: posted, At: time.Now(), OnTicket: sent})
 	r.mu.Unlock()
 	r.save()
 	r.emit("triage.question", map[string]any{"issue": issue, "question": question, "posted": posted})

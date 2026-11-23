@@ -6,19 +6,27 @@ Per D2 the agent decides and the engine executes. Tracker writes go through the 
 
 ## Starting one
 
-```
-factory triage [-project HF] [-level fix] [-jobs 2] [-minutes 30] [-focus "the export bugs"] [repo]
-```
+Open the map, press **🏛 Board** (or B) and pick a repository. **Run Pericles now** takes:
 
-or `POST /api/triage` with `{repo, project, level, max_jobs, minutes, focus}`.
+- **YouTrack project**: the board's short name, like HF. It's filled in from the repo's `factory.yml` tracker block when there is one, else from its last run or its jobs' tickets.
+- **Jobs he may start**: 2 by default, up to 10. With 0 he only recommends.
+- **Time limit**: 30 minutes by default. The agent is stopped when it runs out.
+- **What he may change**: the control level, by default the tracker's level (Fix unless `factory.yml` says otherwise).
+- **Focus**: optional, what to look at first.
 
-- `project` is the YouTrack project. It is only needed when the repo's `factory.yml` has no tracker block, and it must match the block when there is one.
-- `level` defaults to the tracker's level, which is `fix` unless `factory.yml` says otherwise.
-- `max_jobs` defaults to 2 and goes up to 10. With 0, `start_job` only records a recommendation.
-- `minutes` defaults to 30. The agent is stopped when the time runs out.
-- Only one run goes over a board at a time. A second one gets 409.
+Only one run goes over a board at a time. The panel lists each run with why it started, what he changed, the jobs he started (click one to open its city), what he recommended, the questions he asked and the tickets still waiting on the owner. Homer tells the story on the map as he works.
 
-`GET /api/triage` lists this server's runs, `GET /api/triage/{id}` shows one (from `~/.factory/triage/<id>/run.json` after a restart), and `POST /api/triage/{id}/stop` stops it.
+## Running on his own
+
+Off for every repository until you turn it on in the panel. You tick what makes him run:
+
+- **An owner answered one of his questions**: a comment from a person on a ticket he asked about, after he asked.
+- **Someone created or changed a ticket**: a ticket in the project updated after his last run started, later than the factory's own last write to it. The factory's moves and comments don't count.
+- **His jobs are done and he left ready tickets**: his last run started as many jobs as it could, still listed ready tickets, and no job is going in the repo now.
+
+The engine looks every 5 minutes. A run starts only when one of the ticked things happened, no run is going, at least the gap (60 minutes by default) has passed since the last run ended, and fewer than the daily limit (6 by default) automatic runs started today. The first look after you turn it on starts a run if he has never run on that repo. The panel shows what the last look decided. The settings are kept per repo under `triage` in `~/.factory/settings.json`; Admin's own saves leave them alone.
+
+The API behind the panel: `GET /api/triage/boards`, `PUT /api/triage/auto`, `POST /api/triage`, `GET /api/triage?repo=`, `GET /api/triage/{id}` and `POST /api/triage/{id}/stop`. Runs are kept in `~/.factory/triage/<id>/run.json` and come back after a restart; a run that was going when the engine stopped is marked stopped.
 
 ## What the levels allow
 
@@ -42,4 +50,4 @@ The agent can read the repo (`read`, `grep`, `find`, `ls`) and has no shell. Its
 
 ## Events
 
-On the bus under `triage-<id>`: `triage.started`, `triage.question`, `triage.job`, `triage.report` and `triage.ended`, plus the `tracker.*` events from the guard.
+On the bus under `triage-<id>`: `triage.started` (with `auto` and `why`), `triage.question`, `triage.job`, `triage.report` and `triage.ended`, plus the `tracker.*` events from the guard.

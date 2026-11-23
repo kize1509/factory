@@ -125,6 +125,47 @@ type Engine struct {
 	Skills   map[string][]string     `json:"skills,omitempty"` // role -> skill names
 	YouTrack YouTrack                `json:"youtrack"`
 	Limits   Limits                  `json:"limits"`
+	// Triage holds, per repo, whether the product agent goes over the
+	// board on its own and when. Off unless you turn it on.
+	Triage map[string]TriageAuto `json:"triage,omitempty"`
+}
+
+// TriageAuto is when the product agent runs on its own for one repo. It
+// runs only when something happened that it should look at, and never
+// more often than the gap and the daily cap allow.
+type TriageAuto struct {
+	On      bool    `json:"on"`
+	Project string  `json:"project,omitempty"` // the YouTrack project, when factory.yml has none
+	Level   string  `json:"level,omitempty"`   // default the tracker's level
+	MaxJobs int     `json:"max_jobs"`          // jobs a run may start
+	Minutes float64 `json:"minutes,omitempty"` // how long a run may take; default 30
+	Gap     int     `json:"gap_minutes"`       // least time between two runs; default 60
+	PerDay  int     `json:"per_day"`           // most automatic runs a day; default 6
+	// what makes it run; each one is off until you tick it
+	OnBoard   bool `json:"on_board"`   // a person created or changed a ticket
+	OnAnswers bool `json:"on_answers"` // an owner answered one of its questions
+	OnReady   bool `json:"on_ready"`   // the jobs it started are done and it left ready tickets
+}
+
+// Normalised fills in the defaults.
+func (t TriageAuto) Normalised() TriageAuto {
+	if t.Gap <= 0 {
+		t.Gap = 60
+	}
+	if t.PerDay <= 0 {
+		t.PerDay = 6
+	}
+	if t.Minutes <= 0 {
+		t.Minutes = 30
+	}
+	if t.MaxJobs < 0 {
+		t.MaxJobs = 0
+	}
+	if t.MaxJobs > 10 {
+		t.MaxJobs = 10
+	}
+	t.Level = ValidLevel(t.Level)
+	return t
 }
 
 // ProjectRoles are the role settings one project overrides.
@@ -151,14 +192,14 @@ type Limits struct {
 }
 
 // RoleNames lists the roles in pipeline order.
-var RoleNames = []string{"product", "scheduler", "ops", "researcher", "planner", "builder", "executor", "reviewer", "humanizer", "finalizer"}
+var RoleNames = []string{"product", "ops", "researcher", "planner", "builder", "executor", "reviewer", "humanizer", "finalizer"}
 
 // DefaultRoles follows D29 and D31: Pi everywhere, the Claude model of
 // each role's tier.
 func DefaultRoles() map[string]Role {
 	think, code, execute := "anthropic/claude-opus-5-5", "anthropic/claude-sonnet-5-5", "anthropic/claude-haiku-5-5"
 	return map[string]Role{
-		"product": {"pi", think}, "scheduler": {"pi", think}, "planner": {"pi", think}, "reviewer": {"pi", think},
+		"product": {"pi", think}, "planner": {"pi", think}, "reviewer": {"pi", think},
 		"researcher": {"pi", code}, "builder": {"pi", code}, "humanizer": {"pi", code},
 		"executor": {"pi", execute}, "finalizer": {"pi", execute},
 		"ops": {"pi", "openai/gpt-6.1-terra"}, // Hermes, the operations agent (D2, D29)
@@ -248,5 +289,21 @@ func LoadEngine() Engine {
 	if err == nil {
 		json.Unmarshal(data, &e)
 	}
+	e.dropRetired()
 	return e
+}
+
+// retiredRoles were roles once; settings saved back then still name them.
+var retiredRoles = []string{"scheduler"}
+
+// dropRetired forgets the settings of retired roles, so they don't come
+// back on the next save.
+func (e *Engine) dropRetired() {
+	for _, r := range retiredRoles {
+		delete(e.Roles, r)
+		delete(e.Skills, r)
+		for _, p := range e.Projects {
+			delete(p.Roles, r)
+		}
+	}
 }

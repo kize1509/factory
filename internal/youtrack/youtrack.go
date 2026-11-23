@@ -153,6 +153,47 @@ func (c Client) Search(ctx context.Context, query string, max int) ([]Brief, err
 	return out, nil
 }
 
+// Change is a ticket and when it last changed.
+type Change struct {
+	ID      string
+	Summary string
+	Updated time.Time
+}
+
+// Changed lists the project's tickets changed after since, newest first, at
+// most max of them.
+func (c Client) Changed(ctx context.Context, project string, since time.Time, max int) ([]Change, error) {
+	if max <= 0 || max > 100 {
+		max = 50
+	}
+	p, err := Quote(project)
+	if err != nil {
+		return nil, err
+	}
+	q := url.Values{"query": {"project: " + p + " sort by: updated desc"}, "$top": {fmt.Sprint(max)}, "fields": {"idReadable,summary,updated"}}
+	data, err := c.do(ctx, "GET", "/api/issues?"+q.Encode(), nil, "")
+	if err != nil {
+		return nil, err
+	}
+	var raw []struct {
+		ID      string `json:"idReadable"`
+		Summary string `json:"summary"`
+		Updated int64  `json:"updated"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, err
+	}
+	var out []Change
+	for _, r := range raw {
+		at := time.UnixMilli(r.Updated)
+		if !at.After(since) {
+			break // sorted newest first
+		}
+		out = append(out, Change{ID: r.ID, Summary: r.Summary, Updated: at})
+	}
+	return out, nil
+}
+
 // Comment is one comment on an issue.
 type Comment struct {
 	ID      string `json:"id"`

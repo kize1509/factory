@@ -14,7 +14,9 @@ type Philosopher struct {
 }
 
 var Philosophers = []Philosopher{
-	{"solon", "Solon", "scheduler", "short", HairGrey, "short", HairGrey, ClothBlue, Olive, "tablet"},
+	// Pericles runs the board from the Council house: an older statesman
+	// with a laurel band and a wax tablet of tickets.
+	{"pericles", "Pericles", "product", "short", HairGrey, "short", HairGrey, ClothBlue, Olive, "tablet"},
 	{"herodotus", "Herodotus", "researcher", "curly", HairDark, "full", HairDark, Terracotta, Clear, "scroll"},
 	{"thales", "Thales", "researcher", "receding", HairGrey, "long", HairGrey, ClothBlue, Clear, "star"},
 	{"anaximander", "Anaximander", "researcher", "short", HairDark, "short", HairDark, Olive, Clear, "map"},

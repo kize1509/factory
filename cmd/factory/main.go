@@ -2,7 +2,6 @@
 //
 //	factory init            add factory.yml and ignore .factory/ in this repo
 //	factory serve [flags]   start the engine and the web interface
-//	factory triage [flags] [repo]   let the product agent go over the repo's board
 //	factory test replay|results <run> [--json]   reproduce or read a recorded run (docs/TESTING.md)
 package main
 
@@ -27,7 +26,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: factory init | factory serve [-port 7777] | factory triage [-project HF] [repo]")
+		fmt.Fprintln(os.Stderr, "usage: factory init | factory serve [-port 7777]")
 		os.Exit(2)
 	}
 	switch os.Args[1] {
@@ -37,8 +36,6 @@ func main() {
 		serve(os.Args[2:])
 	case "test":
 		os.Exit(testCmd(os.Args[2:]))
-	case "triage":
-		os.Exit(triageCmd(os.Args[2:]))
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command %q\n", os.Args[1])
 		os.Exit(2)
@@ -100,8 +97,9 @@ func serve(args []string) {
 		model = "anthropic/claude-sonnet-5-5"
 	}
 	s := &server.Server{
-		Bus:     bus,
-		Gateway: gateway.New(wire, bus),
+		TriageEvery: 5 * time.Minute, // the product agent's automatic schedule, for the repos you turned it on for
+		Bus:         bus,
+		Gateway:     gateway.New(wire, bus),
 		Runtimes: map[string]runtime.Runtime{
 			"pi":          &runtime.Pi{HostDir: filepath.Join(*root, "pi-host"), AgentDir: filepath.Join(home, "pi-agent"), Engine: engine, Bus: bus},
 			"claude-code": &runtime.Claude{Engine: engine, Bus: bus},

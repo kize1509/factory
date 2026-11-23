@@ -43,7 +43,13 @@ type Server struct {
 	jobs   map[string]*job.Job
 	passes map[string]*patrol.Pass
 	triage map[string]*triage.Run
-	n      int
+	// TriageEvery is how often the automatic schedule looks at the boards;
+	// zero turns the schedule off (tests).
+	TriageEvery time.Duration
+	autoMu      sync.Mutex
+	autoNote    map[string]string // repo -> what the schedule last decided
+	looping     bool
+	n           int
 }
 
 func (s *Server) Handler() http.Handler {
@@ -51,6 +57,11 @@ func (s *Server) Handler() http.Handler {
 		s.jobs = map[string]*job.Job{}
 	}
 	s.startOps()
+	s.loadTriage()
+	if s.TriageEvery > 0 && !s.looping {
+		s.looping = true
+		go s.triageLoop(context.Background(), s.TriageEvery)
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/jobs", s.startJob)
 	mux.HandleFunc("GET /api/jobs", s.listJobs)

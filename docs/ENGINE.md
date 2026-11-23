@@ -174,7 +174,7 @@ Any agent but the reviewer can ask you with `ask_human` the moment it needs some
 
 Open questions left in a handoff note don't stop the job any more. They go on to the reviewer as findings.
 
-The review step is described in §8. The other roles (research, planning, humanizer, finalizer, scheduler) come in M1. M0 proves the spine: worktree, Pi, gateway, checks, healing loop, handoff, events.
+The review step is described in §8. The other roles (research, planning, humanizer, finalizer) come in M1. M0 proves the spine: worktree, Pi, gateway, checks, healing loop, handoff, events.
 
 ## 7. HTTP API (M0)
 
@@ -290,6 +290,6 @@ The planned layout of `.factory/` is in PRD §10.6.
 
 1. ~~Wire the web map to `/api/events`.~~ Done.
 2. ~~Claude Code and Codex runtimes.~~ Done.
-3. The other roles: survey and check plan, research, planner, humanizer, finalizer, scheduler (the reviewer is done).
+3. The other roles: survey and check plan, research, planner, humanizer, finalizer (the reviewer is done). The product agent runs between jobs; see `docs/TRIAGE.md`.
 4. YouTrack: load a ticket by ID, comment and move it to review.
 5. ~~Ship modes push and PR.~~ Done.

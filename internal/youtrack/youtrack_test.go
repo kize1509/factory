@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestIssue(t *testing.T) {
@@ -138,5 +139,18 @@ func TestQuote(t *testing.T) {
 		if _, err := Quote(bad); err == nil {
 			t.Errorf("Quote(%q) should fail", bad)
 		}
+	}
+}
+
+func TestChangedStopsAtSince(t *testing.T) {
+	var query string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query = r.URL.Query().Get("query")
+		w.Write([]byte(`[{"idReadable":"HF-3","summary":"new","updated":2000},{"idReadable":"HF-2","summary":"old","updated":1000}]`))
+	}))
+	defer srv.Close()
+	got, err := Client{URL: srv.URL, Token: "perm:x"}.Changed(context.Background(), "HF", time.UnixMilli(1500), 10)
+	if err != nil || len(got) != 1 || got[0].ID != "HF-3" || !strings.Contains(query, "project: HF sort by: updated desc") {
+		t.Fatalf("%+v %v %q", got, err, query)
 	}
 }

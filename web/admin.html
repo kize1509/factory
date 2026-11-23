@@ -330,7 +330,7 @@ function bars(rows, value, label) {
 // Node colours are each philosopher's Cloth in art/portraits.go, as [day, dusk] from the Palette in art/palette.go.
 const CL = { blue:['#1d4e89', '#26406e'], red:['#a63d33', '#7a2e38'], terracotta:['#b5523b', '#8f4440'], olive:['#6b8a3a', '#40593e'], marble:['#fbfaf6', '#d4d9e8'],
   shade:['#cdd5df', '#8e97b4'], stone:['#b9b4a8', '#6f7088'], sand:['#eadcb5', '#a69c86'], ink:['#3d4f6b', '#2a3550'] };
-const CG_COLOR = { solon:CL.blue, herodotus:CL.terracotta, thales:CL.blue, anaximander:CL.olive, eratosthenes:CL.sand, aristotle:CL.red, plato:CL.blue, archimedes:CL.terracotta,
+const CG_COLOR = { pericles:CL.blue, herodotus:CL.terracotta, thales:CL.blue, anaximander:CL.olive, eratosthenes:CL.sand, aristotle:CL.red, plato:CL.blue, archimedes:CL.terracotta,
   hero:CL.blue, euclid:CL.olive, pythagoras:CL.marble, socrates:CL.shade, diogenes:CL.stone, zeno:CL.blue, heraclitus:CL.red, protagoras:CL.red, isocrates:CL.marble,
   xenophon:CL.blue, hermes:CL.blue, homer:CL.marble, solomun:CL.ink, you:['#c49a2c', '#9c7d3a'], oracle:['#3d8fd8', '#4a3f7a'] };   // you = bronze, oracle = sky-high
 const cgColor = (id, dark) => CG_COLOR[id]?.[dark ? 1 : 0] || 'var(--accent)';
