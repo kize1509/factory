@@ -603,3 +603,16 @@ func TestApproveDraftWithoutTrackerBlock(t *testing.T) {
 		t.Fatalf("commands %v", c)
 	}
 }
+
+func TestSplitSortKeepsSortOutsideTheBrackets(t *testing.T) {
+	for in, want := range map[string][2]string{
+		"#Unresolved sort by: updated desc": {"#Unresolved", "sort by: updated desc"},
+		"Sort by: priority":                 {"", "Sort by: priority"},
+		"login bug":                         {"login bug", ""},
+	} {
+		f, s := splitSort(in)
+		if f != want[0] || s != want[1] {
+			t.Errorf("splitSort(%q) = %q, %q", in, f, s)
+		}
+	}
+}

@@ -154,3 +154,36 @@ func TestChangedStopsAtSince(t *testing.T) {
 		t.Fatalf("%+v %v %q", got, err, query)
 	}
 }
+
+func TestBoardListsOpenTicketsWithLinks(t *testing.T) {
+	var query, top string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query, top = r.URL.Query().Get("query"), r.URL.Query().Get("$top")
+		w.Write([]byte(`[
+ {"idReadable":"MR-8","summary":"Step 6","updated":1795512449037,"comments":[{"id":"1"},{"id":"2"}],
+  "customFields":[{"name":"State","value":{"name":"Open"}},{"name":"Assignee","value":{"login":"zoran"}}],
+  "links":[{"direction":"OUTWARD","linkType":{"name":"Depend","sourceToTarget":"depends on","targetToSource":"is required for"},"issues":[{"idReadable":"MR-12","resolved":null}]},
+           {"direction":"INWARD","linkType":{"name":"Depend","sourceToTarget":"depends on","targetToSource":"is required for"},"issues":[{"idReadable":"MR-10"}]},
+           {"direction":"BOTH","linkType":{"name":"Relates","sourceToTarget":"relates to"},"issues":[]}]},
+ {"idReadable":"MR-12","summary":"Step 5","updated":1795512449037,"customFields":[]}
+]`))
+	}))
+	defer srv.Close()
+	cards, more, err := Client{URL: srv.URL, Token: "perm:x"}.Board(context.Background(), "MR", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(query, "#Unresolved") || !strings.HasSuffix(query, "sort by: updated desc") || top != "2" {
+		t.Fatalf("query %q top %q", query, top)
+	}
+	if !more || len(cards) != 1 {
+		t.Fatalf("more %v cards %d", more, len(cards))
+	}
+	c := cards[0]
+	if c.Fields["State"] != "Open" || c.Fields["Assignee"] != "zoran" || c.Comments != 2 {
+		t.Fatalf("%+v", c)
+	}
+	if len(c.Links) != 2 || c.Links[0].Type != "depends on" || c.Links[1].Type != "is required for" || c.Links[1].Issues[0] != "MR-10" {
+		t.Fatalf("links %+v", c.Links)
+	}
+}

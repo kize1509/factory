@@ -126,9 +126,11 @@ func (c Client) postJSON(ctx context.Context, path string, v any) ([]byte, error
 
 // Brief is one line of a search result.
 type Brief struct {
-	ID      string `json:"idReadable"`
-	Summary string `json:"summary"`
-	State   string `json:"state,omitempty"`
+	ID       string `json:"idReadable"`
+	Summary  string `json:"summary"`
+	State    string `json:"state,omitempty"`
+	Priority string `json:"priority,omitempty"`
+	Type     string `json:"type,omitempty"`
 }
 
 // Search runs a YouTrack query, like "project: HF #Unresolved login".
@@ -148,7 +150,7 @@ func (c Client) Search(ctx context.Context, query string, max int) ([]Brief, err
 	}
 	out := make([]Brief, len(raw))
 	for i, is := range raw {
-		out[i] = Brief{ID: is.ID, Summary: is.Summary, State: is.field("State")}
+		out[i] = Brief{ID: is.ID, Summary: is.Summary, State: is.field("State"), Priority: is.field("Priority"), Type: is.field("Type")}
 	}
 	return out, nil
 }
@@ -431,4 +433,95 @@ func Quote(v string) (string, error) {
 		return "{" + v + "}", nil
 	}
 	return v, nil
+}
+
+// Card is one ticket as the board shows it: its fields and how it links to
+// others, without the description and comments.
+type Card struct {
+	ID       string
+	Summary  string
+	Fields   map[string]string // State, Priority, Type, Assignee, ...
+	Links    []Link            // only links to open tickets and named directions
+	Comments int
+	Updated  time.Time
+}
+
+// Board lists the project's open tickets, most recently changed first, at
+// most max of them (default 100). It also reports whether there were more.
+func (c Client) Board(ctx context.Context, project string, max int) ([]Card, bool, error) {
+	if max <= 0 || max > 200 {
+		max = 100
+	}
+	p, err := Quote(project)
+	if err != nil {
+		return nil, false, err
+	}
+	q := url.Values{"query": {"project: " + p + " #Unresolved sort by: updated desc"}, "$top": {fmt.Sprint(max + 1)},
+		"fields": {"idReadable,summary,updated,customFields(name,value(name,login)),comments(id)," +
+			"links(direction,linkType(name,sourceToTarget,targetToSource),issues(idReadable,resolved))"}}
+	data, err := c.do(ctx, "GET", "/api/issues?"+q.Encode(), nil, "")
+	if err != nil {
+		return nil, false, err
+	}
+	var raw []struct {
+		Issue
+		Updated  int64             `json:"updated"`
+		Comments []json.RawMessage `json:"comments"`
+		Links    []struct {
+			Dir  string `json:"direction"`
+			Type struct {
+				Name   string `json:"name"`
+				Out    string `json:"sourceToTarget"`
+				Inward string `json:"targetToSource"`
+			} `json:"linkType"`
+			Issues []struct {
+				ID       string `json:"idReadable"`
+				Resolved *int64 `json:"resolved"`
+			} `json:"issues"`
+		} `json:"links"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, false, err
+	}
+	more := len(raw) > max
+	if more {
+		raw = raw[:max]
+	}
+	out := make([]Card, 0, len(raw))
+	for _, is := range raw {
+		cd := Card{ID: is.ID, Summary: is.Summary, Fields: map[string]string{}, Comments: len(is.Comments), Updated: time.UnixMilli(is.Updated)}
+		for _, cf := range is.CustomFields {
+			var v struct {
+				Name  string `json:"name"`
+				Login string `json:"login"`
+			}
+			json.Unmarshal(cf.Value, &v)
+			if n := firstNonEmpty(v.Name, v.Login); n != "" {
+				cd.Fields[cf.Name] = n
+			}
+		}
+		for _, l := range is.Links {
+			// the link's name as read from this ticket: "depends on", "is required for", ...
+			name := l.Type.Out
+			if l.Dir == "INWARD" && l.Type.Inward != "" {
+				name = l.Type.Inward
+			}
+			if name == "" {
+				name = l.Type.Name
+			}
+			ln := Link{Type: name, Dir: l.Dir}
+			for _, o := range l.Issues {
+				id := o.ID
+				if o.Resolved != nil {
+					id += " (resolved)"
+				}
+				ln.Issues = append(ln.Issues, id)
+			}
+			if len(ln.Issues) > 0 {
+				cd.Links = append(cd.Links, ln)
+			}
+		}
+		out = append(out, cd)
+	}
+	return out, more, nil
 }

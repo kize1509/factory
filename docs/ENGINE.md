@@ -150,7 +150,8 @@ flowchart TD
     BW --> RC["run checks"]
     RC -->|pass| HC["handoff check"]
     RC -->|"fail: send failures back to the builder, max N loops"| BW
-    HC -->|valid| RV["review (Socrates)"]
+    HC -->|valid| CU["catch up with origin's default branch"]
+    CU -->|"main moved: builder resolves conflicts, checks run again"| RV["review (Socrates)"]
     HC -->|"missing or invalid: prompt same agent, twice at most"| HC
     RV -->|"blocking findings, max 2 rounds"| BW
     RV -->|ok| CM["commit"]
@@ -158,6 +159,12 @@ flowchart TD
     BW & RC & HC & RV & CM -.->|"can't get further"| ST["stuck: tells you, waits"]
     ST -.->|"your guidance"| BW
 ```
+
+A job's branch starts from origin's default branch, fetched fresh, never from the main checkout's HEAD. The main checkout may be behind or have another branch out, and building on it is what stacked PRs on each other and made them conflict. A repo without an origin still starts from HEAD.
+
+Before review the engine brings the work onto the latest origin default branch again, since other jobs may have merged in the meantime. If that conflicts, the builder resolves the conflict markers in the files and the checks run again. The push rebases once more, and the PR always targets the default branch. When nothing is left that the default branch doesn't already have (the same change was merged elsewhere, or the ticket's work was on other branches), the job ends done with no PR. It doesn't get stuck on "No commits between main and …". A merge, rebase or cherry-pick an agent left half done is ended before the engine commits.
+
+Existing tests: with a reviewer, a builder may update an existing test that the ticket's change makes out of date. The reviewer gets the list of changed test files and blocks any edit that weakens a test. The PR lists them too. Only a job with no reviewer has its edits to existing tests put back. `tests_allowed` (from New task, or Pericles' `start_job`) lifts the check entirely.
 
 Every job starts with Aristotle. He names it (and, the first time, the project: `name_job`), reads the code and leaves a plan for the builder. On a complex job he may open a Symposium.
 
@@ -170,7 +177,7 @@ A job never fails. When the engine can't get further on its own (the checks keep
 
 Your guidance (Guide it on, in the bar, the Admin Jobs tab, or a message to the agent) goes to the same builder, which remembers its work. A job stuck before a restart starts a new builder in the same worktree with the written brief and your guidance. Then the checks, the handoff, review and the commit follow as usual. It can get stuck and be guided on as often as it takes. Old failed or interrupted jobs can be guided on the same way.
 
-Any agent but the reviewer can ask you with `ask_human` the moment it needs something only you can give: a credential, a key, access, a decision the ticket doesn't make, or help after the same thing failed twice. The request is short: `need` (one sentence, "I need …"), `why` (one or two) and optional `options`. The tool returns at once and the agent ends its turn; the job waits in "needs you" (a bar, a chime, a notification). Your answer is the agent's next message, and it carries on. Because the tool never blocks, no runtime's tool timeout gets in the way.
+Any agent but the reviewer can ask you with `ask_human` the moment it needs something only you can give: a credential, a key, access, a decision the ticket doesn't make, or help after the same thing failed twice. The request is written for someone who hasn't watched the job: `need` (the question itself, one plain sentence), `why` (one or two sentences of context), `recommend` (what the agent would do, so you can say yes) and optional `options`. The engine adds who asks and on which ticket. It turns away asks for permission to change tests or to rebase or merge, since it decides those itself, and a `need` longer than 300 characters. The tool returns at once and the agent ends its turn; the job waits in "needs you" (a bar, a chime, a notification). Your answer is the agent's next message, and it carries on. Because the tool never blocks, no runtime's tool timeout gets in the way.
 
 Open questions left in a handoff note don't stop the job any more. They go on to the reviewer as findings.
 

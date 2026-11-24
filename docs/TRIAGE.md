@@ -46,11 +46,13 @@ At Fix the product agent may change fields and states on tickets the factory did
 
 ## Tools
 
-The agent can read the repo (`read`, `grep`, `find`, `ls`) and has no shell. It gets the same tools on every runtime: Claude and Codex reach them over MCP, pi through `/api/tools/triage-<id>/…`. Its tools:
+The agent can read the code (`read`, `grep`, `find`, `ls`) and has no shell. He reads it in `.factory/board`, a checkout of origin's default branch that is fetched and reset for every run, so he sees what is merged and not a main checkout that may be behind.
 
-- `tracker_search`, `tracker_read`, `tracker_create`, `tracker_update`, `tracker_move`, `tracker_comment`, `tracker_link`, `tracker_attach` and `knowledge_search`, served by the operations service for the run's scope `triage-<id>`.
+His first message carries the board: every open ticket (up to 100) with its State, Priority, Type, Complexity, Ship mode, Assignee, comment count and links such as "depends on". It also lists the factory's last 25 jobs in the repo and what became of their PRs (MERGED, CLOSED, or OPEN and whether it can merge), so he knows whether a dependency is on main. He starts a ticket that depends on another only once that one's PR is merged, which keeps PRs from stacking. It gets the same tools on every runtime: Claude and Codex reach them over MCP, pi through `/api/tools/triage-<id>/…`. Its tools:
+
+- `tracker_search` (up to 50 results, with State, Priority and Type; a `sort by:` clause is kept), `tracker_read`, `tracker_create`, `tracker_update`, `tracker_move`, `tracker_comment`, `tracker_link`, `tracker_attach` and `knowledge_search`, served by the operations service for the run's scope `triage-<id>`.
 - `ask_owner(issue, question)` posts `[factory] Question for the owner: …` on the ticket. The owner answers there, and a later run reads the answer in the comments. At Observe the comment is refused and the question stays in the run's report.
-- `start_job(issue, why, notes)` starts a job the way `POST /api/jobs` does, with the notes added. The engine refuses a ticket outside the project, a ticket a live job already works on, a ticket picked twice in one run, and anything past `max_jobs`. The job moves its own ticket on the board.
+- `start_job(issue, why, notes, tests_allowed)` starts a job the way `POST /api/jobs` does, with the notes added. `tests_allowed` lets the job change existing tests without the reviewer's check, for tickets whose owner said so. The engine refuses a ticket outside the project, a ticket a live job already works on, a ticket picked twice in one run, and anything past `max_jobs`. The job moves its own ticket on the board.
 - `finish_triage(summary, ready, blocked)` ends the run. An agent that stops without it is reminded twice, and then the run fails.
 
 ## Events

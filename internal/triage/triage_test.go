@@ -98,7 +98,7 @@ func setup(t *testing.T, level string, maxJobs int, turns [][]call) (*Run, *scri
 	var started []string
 	run := &Run{ID: "T1", Repo: t.TempDir(), Project: "HF", Level: level, MaxJobs: maxJobs, RT: rt, Model: "m", Ops: svc, Bus: bus, Dir: t.TempDir(),
 		Live: func() []LiveJob { return []LiveJob{{ID: "HF-3", Issue: "HF-3", State: "building"}} },
-		Start: func(issue, notes string) (string, error) {
+		Start: func(issue, notes string, _ bool) (string, error) {
 			started = append(started, issue+": "+notes)
 			return issue, nil
 		}}
@@ -225,5 +225,46 @@ func TestLoadMarksAnInterruptedRunStopped(t *testing.T) {
 	got, err := Load(dir)
 	if err != nil || got.ID != "T9" || got.State != Stopped || got.Error == "" {
 		t.Fatalf("%+v %v", got, err)
+	}
+}
+
+// The brief shows the whole board with links, and what became of earlier
+// jobs' PRs, so the agent knows whether a dependency is on main.
+func TestBriefShowsBoardAndPRs(t *testing.T) {
+	run := &Run{ID: "T2", Repo: "/r", Project: "HF", Level: "fix", MaxJobs: 2, Base: "origin/main",
+		Board: func(context.Context) ([]youtrack.Card, bool, error) {
+			return []youtrack.Card{
+				{ID: "HF-8", Summary: "Step 6", Fields: map[string]string{"State": "Open", "Priority": "Major"}, Comments: 2,
+					Links: []youtrack.Link{{Type: "depends on", Issues: []string{"HF-12"}}}},
+				{ID: "HF-12", Summary: "Step 5", Fields: map[string]string{"State": "In Review"}},
+			}, true, nil
+		},
+		Recent: func() []PastJob {
+			return []PastJob{{ID: "HF-12", Issue: "HF-12", State: "done", PR: "https://github.com/o/r/pull/11", PRState: "OPEN, conflicts with the base branch"}}
+		}}
+	b := run.brief(context.Background())
+	for _, want := range []string{
+		"fresh checkout of origin/main",
+		"- HF-8 Step 6 (State: Open, Priority: Major; 2 comments;",
+		"    depends on HF-12",
+		"HF-12 on HF-12: done, https://github.com/o/r/pull/11 OPEN, conflicts with the base branch",
+		"more open tickets than these",
+		"Read each one with tracker_read",
+	} {
+		if !strings.Contains(b, want) {
+			t.Errorf("brief lacks %q:\n%s", want, b)
+		}
+	}
+}
+
+// start_job passes tests_allowed on to the engine.
+func TestStartJobPassesTestsAllowed(t *testing.T) {
+	var got bool
+	run := &Run{ID: "T3", Project: "HF", MaxJobs: 1, Start: func(issue, notes string, ta bool) (string, error) { got = ta; return issue, nil }}
+	if _, err := run.Tool(Pericles, "start_job", []byte(`{"issue":"HF-1","why":"ready","tests_allowed":true}`)); err != nil {
+		t.Fatal(err)
+	}
+	if !got {
+		t.Fatal("tests_allowed was dropped")
 	}
 }

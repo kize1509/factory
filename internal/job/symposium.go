@@ -292,11 +292,7 @@ func (j *Job) runExperiment(ctx context.Context, r *expResult, e Experiment, bas
 		"Scratch folder for logs: %s\nThe engine will check your work with: %s",
 		j.ID, j.Title, j.Prompt, r.Index, e.Name, e.Hypothesis, e.Approach, e.SuccessSignal,
 		filepath.Join(j.Dir(), "scratch"), strings.Join(quoted(j.Checks), ", "))
-	if j.TestsAllowed {
-		task += "\nYou may change existing test files in this task, not only add new ones."
-	} else {
-		task += "\nDon't change existing test files. You can add new ones. The engine puts changed test files back, and an experiment that changes existing tests is out."
-	}
+	task += strings.Replace(j.testsRule(), "\n\n", "\n", 1)
 	if _, err := j.ask(ctx, r.agent, task); err != nil {
 		r.Out, r.Why = true, "the builder failed: "+err.Error()
 		return

@@ -24,6 +24,7 @@ import (
 	"factory/internal/ops"
 	"factory/internal/prompts"
 	"factory/internal/runtime"
+	"factory/internal/youtrack"
 )
 
 // Pericles is the product agent's id on the map and in events.
@@ -42,6 +43,16 @@ type LiveJob struct {
 	ID    string `json:"id"`
 	Issue string `json:"issue"`
 	State string `json:"state"`
+}
+
+// PastJob is a job the factory ran in the repo, with what became of its
+// pull request: what tells the agent whether a ticket's work is on main.
+type PastJob struct {
+	ID      string
+	Issue   string
+	State   string // the job's state: done, stuck, cancelled, ...
+	PR      string // the pull request's URL, if it opened one
+	PRState string // MERGED, OPEN, CLOSED; for an open one also whether it can merge
 }
 
 // Question is one question the product agent put to the ticket's owner.
@@ -80,13 +91,19 @@ type Run struct {
 	Auto    bool          `json:"auto,omitempty"` // the engine started it on its own
 	Why     string        `json:"why,omitempty"`  // what made it start
 
-	RT    runtime.Runtime                           `json:"-"`
-	Model string                                    `json:"-"`
-	Ops   *ops.Service                              `json:"-"`
-	Bus   *events.Bus                               `json:"-"`
-	Dir   string                                    `json:"-"` // where run.json goes
-	Live  func() []LiveJob                          `json:"-"` // the jobs running in the repo now
-	Start func(issue, notes string) (string, error) `json:"-"` // starts a job on a ticket
+	RT    runtime.Runtime                                              `json:"-"`
+	Model string                                                       `json:"-"`
+	Ops   *ops.Service                                                 `json:"-"`
+	Bus   *events.Bus                                                  `json:"-"`
+	Dir   string                                                       `json:"-"` // where run.json goes
+	Live  func() []LiveJob                                             `json:"-"` // the jobs running in the repo now
+	Start func(issue, notes string, testsAllowed bool) (string, error) `json:"-"` // starts a job on a ticket
+	// Cwd is where the agent reads the code: a fresh checkout of origin's
+	// default branch, not the main checkout, which may be behind
+	Cwd    string                                                   `json:"-"`
+	Base   string                                                   `json:"-"` // what Cwd is, like origin/main
+	Board  func(ctx context.Context) ([]youtrack.Card, bool, error) `json:"-"` // the open tickets
+	Recent func() []PastJob                                         `json:"-"` // jobs the factory ran here, newest first
 
 	mu        sync.Mutex
 	State     string     `json:"state"`
@@ -208,14 +225,18 @@ func (r *Run) Execute(parent context.Context) error {
 }
 
 func (r *Run) converse(ctx context.Context) error {
-	a, err := r.RT.Start(ctx, runtime.AgentSpec{Job: r.Scope(), Agent: Pericles, Cwd: r.Repo, Model: r.Model,
+	cwd := r.Cwd
+	if cwd == "" {
+		cwd = r.Repo
+	}
+	a, err := r.RT.Start(ctx, runtime.AgentSpec{Job: r.Scope(), Agent: Pericles, Cwd: cwd, Model: r.Model,
 		System: prompts.For("product"), Role: "product", Tools: []string{"read", "grep", "find", "ls"}})
 	if err != nil {
 		return fmt.Errorf("start the product agent: %w", err)
 	}
 	defer a.Stop()
 	go func() { <-ctx.Done(); a.Stop() }()
-	if _, err := a.Prompt(ctx, r.brief()); err != nil && !r.finished() {
+	if _, err := a.Prompt(ctx, r.brief(ctx)); err != nil && !r.finished() {
 		if ctx.Err() != nil {
 			return fmt.Errorf("the run ran out of time or was stopped before the agent finished")
 		}
@@ -241,11 +262,14 @@ func (r *Run) finished() bool {
 	return r.Report != nil
 }
 
-// brief is the run's first message: the board, the limits and what is
-// running now.
-func (r *Run) brief() string {
+// brief is the run's first message: the board, the limits, what is
+// running now and what became of the jobs before.
+func (r *Run) brief(ctx context.Context) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Triage run %s for the repo %s. Its board is the YouTrack project %s.\n\n", r.ID, r.Repo, r.Project)
+	if r.Base != "" {
+		fmt.Fprintf(&b, "Your working folder is a fresh checkout of %s, the code as it is merged now. Read the code there, not in the repo's main checkout, which may be behind.\n\n", r.Base)
+	}
 	fmt.Fprintf(&b, "Control level: %s. %s\n\n", r.Level, levelMeaning(r.Level))
 	if r.MaxJobs > 0 {
 		fmt.Fprintf(&b, "You may start up to %d jobs in this run with start_job.\n\n", r.MaxJobs)
@@ -261,11 +285,73 @@ func (r *Run) brief() string {
 	} else {
 		b.WriteString("No jobs are running in this repo now.\n\n")
 	}
+	if past := r.recent(); len(past) > 0 {
+		b.WriteString("Earlier jobs here and their pull requests. A ticket's work is on main only when its PR is MERGED (or the job shipped without a PR):\n")
+		for _, j := range past {
+			pr := "no PR"
+			if j.PR != "" {
+				pr = j.PR
+				if j.PRState != "" {
+					pr += " " + j.PRState
+				}
+			}
+			fmt.Fprintf(&b, "- %s on %s: %s, %s\n", j.ID, orNone(j.Issue), j.State, pr)
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString(r.boardText(ctx))
 	if r.Focus != "" {
 		fmt.Fprintf(&b, "The person who started this run asks you to focus on:\n%s\n\n", r.Focus)
 	}
-	fmt.Fprintf(&b, "Start with tracker_search for the open tickets, for example \"#Unresolved sort by: updated desc\". Work through them the way your instructions say, then call finish_triage.")
+	b.WriteString("Go through every ticket on this list. Read each one with tracker_read before you decide anything about it, then call finish_triage.")
 	return b.String()
+}
+
+// boardText is the open tickets as a list, with their fields and links, so
+// the agent sees the whole board and how tickets depend on each other.
+func (r *Run) boardText(ctx context.Context) string {
+	if r.Board == nil {
+		return "Start with tracker_search for the open tickets, for example \"#Unresolved sort by: updated desc\".\n\n"
+	}
+	cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	cards, more, err := r.Board(cctx)
+	if err != nil {
+		return "The engine couldn't list the board (" + err.Error() + "). Use tracker_search for the open tickets, for example \"#Unresolved sort by: updated desc\".\n\n"
+	}
+	if len(cards) == 0 {
+		return "The board has no open tickets.\n\n"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "The board's %d open tickets, most recently changed first:\n", len(cards))
+	for _, c := range cards {
+		var fs []string
+		for _, k := range []string{"State", "Priority", "Type", "Complexity", "Ship mode", "Assignee"} {
+			if v := c.Fields[k]; v != "" {
+				fs = append(fs, k+": "+v)
+			}
+		}
+		fmt.Fprintf(&b, "- %s %s (%s; %d comments; changed %s)\n", c.ID, c.Summary, strings.Join(fs, ", "), c.Comments, c.Updated.Format("2006-01-02"))
+		for _, l := range c.Links {
+			fmt.Fprintf(&b, "    %s %s\n", l.Type, strings.Join(l.Issues, ", "))
+		}
+	}
+	if more {
+		b.WriteString("(more open tickets than these; use tracker_search for the rest)\n")
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
+func (r *Run) recent() []PastJob {
+	if r.Recent == nil {
+		return nil
+	}
+	list := r.Recent()
+	if len(list) > 25 {
+		list = list[:25]
+	}
+	return list
 }
 
 func levelMeaning(level string) string {
@@ -315,11 +401,14 @@ func (r *Run) Tool(agent, tool string, args []byte) (string, error) {
 		}
 		return r.askOwner(strings.TrimSpace(b.Issue), strings.TrimSpace(b.Question))
 	case "start_job":
-		var b struct{ Issue, Why, Notes string }
+		var b struct {
+			Issue, Why, Notes string
+			TestsAllowed      bool `json:"tests_allowed"`
+		}
 		if err := json.Unmarshal(args, &b); err != nil {
 			return "", err
 		}
-		return r.startJob(strings.ToUpper(strings.TrimSpace(b.Issue)), strings.TrimSpace(b.Why), strings.TrimSpace(b.Notes))
+		return r.startJob(strings.ToUpper(strings.TrimSpace(b.Issue)), strings.TrimSpace(b.Why), strings.TrimSpace(b.Notes), b.TestsAllowed)
 	case "finish_triage":
 		var rep Report
 		if err := json.Unmarshal(args, &rep); err != nil {
@@ -369,7 +458,7 @@ func (r *Run) askOwner(issue, question string) (string, error) {
 
 // startJob asks the engine for a job on a ready ticket, within the run's
 // limits.
-func (r *Run) startJob(issue, why, notes string) (string, error) {
+func (r *Run) startJob(issue, why, notes string, testsAllowed bool) (string, error) {
 	if issue == "" {
 		return "", fmt.Errorf("start_job needs the ticket")
 	}
@@ -406,7 +495,7 @@ func (r *Run) startJob(issue, why, notes string) (string, error) {
 	case r.Start == nil:
 		return "", fmt.Errorf("the engine can't start jobs from this run")
 	default:
-		id, err := r.Start(issue, notes)
+		id, err := r.Start(issue, notes, testsAllowed)
 		if err != nil {
 			return "", fmt.Errorf("the engine couldn't start a job on %s: %w", issue, err)
 		}

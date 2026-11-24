@@ -59,10 +59,15 @@ func (s *Service) Search(sc *Scope, agent, query string) (string, error) {
 	// "or" binds looser than the implicit AND, so the project term has to
 	// wrap the whole query, never sit next to it
 	// an empty query lists the whole project
-	if q := strings.TrimSpace(query); q == "" {
+	// and "sort by" has to stay outside the brackets, or YouTrack drops it
+	q, sortBy := splitSort(query)
+	if q == "" {
 		query = "project: " + sc.Tracker.Project
 	} else {
 		query = "project: " + sc.Tracker.Project + " and (" + q + ")"
+	}
+	if sortBy != "" {
+		query += " " + sortBy
 	}
 	c, err := s.client()
 	if err != nil {
@@ -70,7 +75,7 @@ func (s *Service) Search(sc *Scope, agent, query string) (string, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	all, err := c.Search(ctx, query, 20)
+	all, err := c.Search(ctx, query, 50)
 	if err != nil {
 		s.emit(sc, Hermes, "tracker.search", map[string]any{"from": agent, "query": query, "error": err.Error()})
 		return "", err
@@ -88,9 +93,29 @@ func (s *Service) Search(sc *Scope, agent, query string) (string, error) {
 	}
 	var b strings.Builder
 	for _, is := range list {
-		fmt.Fprintf(&b, "%s [%s] %s\n", is.ID, is.State, is.Summary)
+		tags := is.State
+		for _, f := range []string{is.Priority, is.Type} {
+			if f != "" {
+				tags += ", " + f
+			}
+		}
+		fmt.Fprintf(&b, "%s [%s] %s\n", is.ID, tags, is.Summary)
+	}
+	if len(all) >= 50 {
+		b.WriteString("(the first 50 only; narrow the query to see the rest)\n")
 	}
 	return strings.TrimSpace(b.String()), nil
+}
+
+var sortRe = regexp.MustCompile(`(?i)\bsort\s+by\s*:`)
+
+// splitSort cuts a YouTrack query into its filter and its "sort by:" part.
+func splitSort(query string) (filter, sortBy string) {
+	query = strings.TrimSpace(query)
+	if loc := sortRe.FindStringIndex(query); loc != nil {
+		return strings.TrimSpace(query[:loc[0]]), strings.TrimSpace(query[loc[0]:])
+	}
+	return query, ""
 }
 
 // Read gives one issue with its comments, links, attachments and history.
