@@ -4,9 +4,11 @@ package job
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -125,15 +127,16 @@ type Job struct {
 	cwd           map[string]string // agent -> the worktree it works in
 	base          string            // the commit the job started from
 
-	alive       bool       // Run is going: a stuck job takes guidance at once
-	guide       chan nudge // your guidance (or action) for a stuck job
-	guidance    []string   // all of it so far
-	resume      *Resume    // set when the next run carries a stuck job on
-	lastFailure string     // the last failed check output
-	named       bool       // the planner gave the job its title
-	prev        *Resume    // where the job was stuck before this resume, to spot a repeat
-	pushTo      string     // the branch on origin it ships to, when you picked a new one
-	force       bool       // you said to overwrite origin's branch on the next push
+	alive       bool            // Run is going: a stuck job takes guidance at once
+	guide       chan nudge      // your guidance (or action) for a stuck job
+	guidance    []string        // all of it so far
+	resume      *Resume         // set when the next run carries a stuck job on
+	lastFailure string          // the last failed check output
+	named       bool            // the planner gave the job its title
+	prev        *Resume         // where the job was stuck before this resume, to spot a repeat
+	pushTo      string          // the branch on origin it ships to, when you picked a new one
+	force       bool            // you said to overwrite origin's branch on the next push
+	testEdits   map[string]bool // existing test files the builders changed, for the reviewer
 }
 
 // nudge is what you give a stuck job: guidance, an action, or both.
@@ -478,7 +481,7 @@ func (j *Job) run(ctx context.Context) (*workspace.Worktree, error) {
 	if j.base == "" {
 		j.base, _ = wt.Head()
 	}
-	j.emit("", "workspace.ready", map[string]any{"path": wt.Path, "branch": wt.Branch})
+	j.emit("", "workspace.ready", map[string]any{"path": wt.Path, "branch": wt.Branch, "from": wt.From})
 	scratch := filepath.Join(j.Dir(), "scratch")
 	os.MkdirAll(scratch, 0o755)
 
@@ -548,9 +551,7 @@ func (j *Job) run(ctx context.Context) (*workspace.Worktree, error) {
 		default:
 			task += "nothing (no checks were picked, so be extra careful)."
 		}
-		if j.TestsAllowed {
-			task += "\n\nYou may change existing test files in this task, not only add new ones."
-		}
+		task += j.testsRule()
 		if plan != nil {
 			task += "\n\nThe planner's handoff for you:\n" + string(mustJSON(plan))
 			if h := j.handover(plan.From, builder, plan); h != "" {
@@ -615,13 +616,16 @@ func orWT(work, wt *workspace.Worktree) *workspace.Worktree {
 // finish takes checked work through the handoff and review to the commit.
 func (j *Job) finish(ctx context.Context, wt, work *workspace.Worktree, a runtime.Agent) error {
 	lead := j.lead
+	if err := j.catchUp(ctx, work, a, lead); err != nil {
+		return err
+	}
 	j.set("handoff")
 	if err := j.requireHandoff(ctx, lead, a); err != nil {
 		return err
 	}
 
 	// the reviewer grills the builder; blocking findings go back to the Workshop
-	for round := 1; j.rtFor("reviewer") != nil && (j.rts != nil || j.reviewRT != nil); round++ {
+	for round := 1; j.hasReviewer(); round++ {
 		v, err := j.review(ctx, work, round)
 		if err != nil {
 			return err
@@ -646,6 +650,11 @@ func (j *Job) finish(ctx context.Context, wt, work *workspace.Worktree, a runtim
 
 // commit makes the job's one commit, merges a winning experiment and ships.
 func (j *Job) commit(wt, work *workspace.Worktree, a runtime.Agent) error {
+	// an agent may have left a merge or rebase half done: the engine can't
+	// reset or commit in the middle of one
+	if q := work.QuitInProgress(); q != "" {
+		j.emit("", "workspace.ended_"+strings.ReplaceAll(q, "-", "_"), map[string]any{"worktree": work.Path})
+	}
 	// only the engine commits: undo any commit an agent made on the job
 	// branch and keep its changes
 	if work == wt && j.base != "" {
@@ -710,7 +719,11 @@ func (j *Job) shipCommitted(wt *workspace.Worktree, sha string) error {
 	}
 	j.Commit = sha
 	j.emit("", "job.committed", map[string]any{"sha": sha, "branch": wt.Branch})
-	if err := j.ship(wt); err != nil {
+	if err := j.ship(wt); err == workspace.ErrNothingToShip {
+		// the change is on the default branch already (merged elsewhere, or
+		// the ticket was about other branches): nothing to push, still done
+		return j.finishNoChanges("everything this job changed is already on origin's default branch")
+	} else if err != nil {
 		return err
 	}
 	j.set("done")
@@ -735,11 +748,20 @@ func (j *Job) ship(wt *workspace.Worktree) error {
 		}
 		j.emit("", "ship.remote_created", map[string]any{"url": url, "as": j.NewRemote.As})
 	}
+	if mode == "pr" && workspace.HasOrigin(wt.Repo) {
+		if err := wt.RebaseOnDefault(); err == nil && wt.Ahead() == 0 {
+			return workspace.ErrNothingToShip
+		}
+	}
 	push := wt.Push
 	if j.force {
 		push = wt.ForcePush
 	}
 	if err := push(); err != nil {
+		var c *workspace.ErrConflict
+		if errors.As(err, &c) {
+			return fmt.Errorf("push: %s moved on while the job ran, and the job's commit conflicts with it in %s. Guide the job to merge them, and it pushes again", c.Onto, strings.Join(c.Files, ", "))
+		}
 		return fmt.Errorf("push: %w", err)
 	}
 	if j.force {
@@ -758,7 +780,7 @@ func (j *Job) ship(wt *workspace.Worktree) error {
 	}
 	url, err := wt.OpenPR(fmt.Sprintf("%s: %s", j.ID, j.Title), j.prBody())
 	if err != nil {
-		return err
+		return err // ErrNothingToShip too: the job ends done without a PR
 	}
 	j.mu.Lock()
 	j.PR = url
@@ -790,6 +812,13 @@ func (j *Job) prBody() string {
 			fmt.Fprintf(&b, "- `%s` passed\n", c)
 		}
 		b.WriteString("\n")
+	}
+	if edits := j.editedTests(); len(edits) > 0 {
+		b.WriteString("## Existing tests changed\n\n")
+		for _, f := range edits {
+			fmt.Fprintf(&b, "- `%s`\n", f)
+		}
+		b.WriteString("\nThe reviewer checked each of these against the ticket.\n\n")
 	}
 	if v != nil && v.Summary != "" {
 		fmt.Fprintf(&b, "## Review\n\n%s\n", v.Summary)
@@ -876,8 +905,10 @@ func (j *Job) review(ctx context.Context, wt *workspace.Worktree, round int) (*V
 		if h := j.handover(j.lead, reviewer, note); h != "" {
 			task += "\n\n" + h
 		}
+		task += j.testEditsForReview()
 	} else {
 		task = fmt.Sprintf("Review round %d. The builder says it fixed your findings and the checks pass again. The diff now:\n```diff\n%s\n```\n\nAsk what you still need with ask_builder (at most %d), then call verdict.", round, diff, maxAsks)
+		task += j.testEditsForReview()
 	}
 	if _, err := j.ask(ctx, r, task); err != nil {
 		return nil, fmt.Errorf("reviewer: %w", err)
@@ -933,26 +964,146 @@ func (j *Job) requireHandoff(ctx context.Context, agent string, a runtime.Agent)
 	}
 }
 
-// protectTests puts back test files that exist at HEAD, unless the job
-// allows test changes. New test files stay: adding tests is fine, rewriting
-// the ones the checks rely on is not. It reports whether it undid anything.
+// protectTests guards the existing tests the checks rely on. With test
+// changes allowed it does nothing. With a reviewer, the edits stay and the
+// reviewer judges each one: an edit the ticket's change calls for (a new
+// migration changes a count) goes through, one that weakens a test to pass
+// is a blocking finding. Without a reviewer nobody would read them, so the
+// engine puts them back. New test files always stay. It reports whether it
+// undid anything.
 func (j *Job) protectTests(ctx context.Context, wt *workspace.Worktree, a runtime.Agent, agent string) bool {
 	if j.TestsAllowed {
 		return false
 	}
 	changed, _ := wt.Changed()
-	var blocked []string
+	var touched []string
 	for _, f := range changed {
 		if isTestFile(f) && wt.InHead(f) {
-			blocked = append(blocked, f)
+			touched = append(touched, f)
 		}
 	}
-	if len(blocked) == 0 || wt.Revert(blocked...) != nil {
+	if len(touched) == 0 {
 		return false
 	}
-	j.emit(agent, "workspace.blocked_write", map[string]any{"files": blocked, "existing": true})
-	j.ask(ctx, a, "You changed existing test files, which this task doesn't allow. The engine put them back: "+strings.Join(blocked, ", ")+". New test files are fine. Fix the code, not the tests the checks rely on.")
+	if j.hasReviewer() {
+		j.mu.Lock()
+		if j.testEdits == nil {
+			j.testEdits = map[string]bool{}
+		}
+		var fresh []string
+		for _, f := range touched {
+			if !j.testEdits[f] {
+				j.testEdits[f] = true
+				fresh = append(fresh, f)
+			}
+		}
+		j.mu.Unlock()
+		if len(fresh) > 0 {
+			j.emit(agent, "workspace.test_edits", map[string]any{"files": fresh})
+		}
+		return false
+	}
+	if wt.Revert(touched...) != nil {
+		return false
+	}
+	j.emit(agent, "workspace.blocked_write", map[string]any{"files": touched, "existing": true})
+	j.ask(ctx, a, "You changed existing test files, and this job has no reviewer to check those edits, so the engine put them back: "+strings.Join(touched, ", ")+". New test files are fine. Fix the code, not the tests the checks rely on.")
 	return true
+}
+
+// hasReviewer reports whether the job's work goes through a reviewer.
+func (j *Job) hasReviewer() bool {
+	return j.rtFor("reviewer") != nil && (j.rts != nil || j.reviewRT != nil)
+}
+
+// testsRule is what the builder's task says about existing tests.
+func (j *Job) testsRule() string {
+	switch {
+	case j.TestsAllowed:
+		return "\n\nYou may change existing test files in this task, not only add new ones."
+	case j.hasReviewer():
+		return "\n\nYou may change an existing test when this ticket's change makes it out of date (a new migration changes a count, a renamed field). Don't ask anyone for permission: say which tests you changed and why in your handoff decisions. Never weaken a test to make it pass. The reviewer reads every change to an existing test and blocks one that hides a problem."
+	}
+	return "\n\nDon't change existing test files; add new ones instead. This job has no reviewer, so the engine puts changed test files back."
+}
+
+// editedTests lists the existing test files the builders changed.
+func (j *Job) editedTests() []string {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	var out []string
+	for f := range j.testEdits {
+		out = append(out, f)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// testEditsForReview points the reviewer at changes to existing tests.
+func (j *Job) testEditsForReview() string {
+	edits := j.editedTests()
+	if len(edits) == 0 {
+		return ""
+	}
+	return "\n\nThe builder changed these existing test files: " + strings.Join(edits, ", ") + ". Check each one. " +
+		"Approve an edit that follows from what the ticket changes (a count, a name, a behaviour the ticket asks for). " +
+		"Block one that loosens an assertion, skips or deletes a test, or makes it pass without the code being right."
+}
+
+// catchUp brings the work onto origin's default branch when it moved on
+// while the job ran, so the PR doesn't conflict with what was merged
+// meanwhile. A conflict goes to the builder to resolve in the files; the
+// checks run again after any update.
+func (j *Job) catchUp(ctx context.Context, work *workspace.Worktree, a runtime.Agent, agent string) error {
+	j.mu.Lock()
+	base := j.base
+	j.mu.Unlock()
+	if base == "" || !workspace.HasOrigin(work.Repo) {
+		return nil
+	}
+	nb, err := work.CatchUp(base)
+	var c *workspace.ErrConflict
+	if errors.As(err, &c) {
+		j.emit(agent, "workspace.conflict", map[string]any{"onto": c.Onto, "files": c.Files})
+		if a == nil {
+			work.Abort(base)
+			j.emit("", "workspace.catch_up_skipped", map[string]any{"why": "no builder to resolve the conflict"})
+			return nil
+		}
+		for try := 0; try < 2 && err != nil; try++ {
+			j.set("building")
+			msg := fmt.Sprintf("While you worked, other changes were merged into %s. Putting your work on top of them conflicts in: %s. "+
+				"Open each file and resolve the conflict markers (<<<<<<<, =======, >>>>>>>) so that both your change and theirs work. "+
+				"Don't run git commands; the engine finishes the update and runs the checks again.", c.Onto, strings.Join(c.Files, ", "))
+			if try > 0 {
+				msg = "Some files still have conflict markers or unresolved conflicts: " + err.Error() + ". Resolve them, without git commands."
+			}
+			if _, aerr := j.ask(ctx, a, msg); aerr != nil {
+				work.Abort(base)
+				return fmt.Errorf("builder: %w", aerr)
+			}
+			err = work.Continue(nb)
+		}
+		if err != nil {
+			work.Abort(base)
+			return fmt.Errorf("the work conflicts with %s and the builder couldn't resolve it: %v", c.Onto, err)
+		}
+	} else if err != nil {
+		j.emit("", "workspace.catch_up_failed", map[string]any{"error": err.Error()})
+		return nil // the push rebases again; don't stop the job over it
+	}
+	if nb == base {
+		return nil
+	}
+	j.mu.Lock()
+	j.base = nb
+	j.mu.Unlock()
+	short := nb
+	if len(short) > 7 {
+		short = short[:7]
+	}
+	j.emit("", "workspace.caught_up", map[string]any{"onto": workspace.FreshBaseName(work.Repo), "base": short})
+	return j.checkLoop(ctx, work, a, agent, false)
 }
 
 func isTestFile(path string) bool {

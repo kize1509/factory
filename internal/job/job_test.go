@@ -592,7 +592,7 @@ func TestAgentAsksYouAndCarriesOn(t *testing.T) {
 	j.mu.Lock()
 	q := j.Question
 	j.mu.Unlock()
-	if q != "**I need the payment API key**\n\nThe client won't start without it." {
+	if q != "Archimedes, working on A1 (pay), asks:\n\n**I need the payment API key**\n\nThe client won't start without it." {
 		t.Errorf("question %q", q)
 	}
 	if !j.Answer("use sk-test-42") {

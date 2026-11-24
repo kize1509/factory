@@ -16,9 +16,14 @@ type Worktree struct {
 	Path   string // .factory/worktrees/<job>
 	Branch string // factory/<job>
 	Remote string // the branch on origin it ships to, when not Branch
+	From   string // what the branch started from, like origin/main; set by Create
 }
 
-// Create adds a worktree on a new branch from the repo's current HEAD.
+// Create adds a worktree on a new branch. With an origin it fetches first
+// and starts from origin's default branch, so a job never builds on a stale
+// local checkout or on whatever branch the main checkout has out (that is
+// how PRs ended up stacked on each other). Without an origin it starts from
+// the repo's HEAD.
 func Create(repo, job string) (*Worktree, error) {
 	w := &Worktree{
 		Repo:   repo,
@@ -31,10 +36,252 @@ func Create(repo, job string) (*Worktree, error) {
 	if err := ensureIgnored(repo); err != nil {
 		return nil, err
 	}
-	if _, err := git(repo, "worktree", "add", "-b", w.Branch, w.Path, "HEAD"); err != nil {
+	git(repo, "worktree", "prune")
+	if _, err := git(repo, "rev-parse", "-q", "--verify", "refs/heads/"+w.Branch); err == nil {
+		// the branch is still here from an earlier run whose worktree went
+		if _, err := git(repo, "worktree", "add", w.Path, w.Branch); err != nil {
+			return nil, err
+		}
+		w.From = w.Branch
+		return w, nil
+	}
+	w.From = "HEAD"
+	if b := FreshBase(repo); b != "" {
+		w.From = b
+	}
+	if _, err := git(repo, "worktree", "add", "--no-track", "-b", w.Branch, w.Path, w.From); err != nil {
 		return nil, err
 	}
 	return w, nil
+}
+
+// DefaultBranch is origin's default branch (main, master, ...), "" when
+// the repo has no origin or origin has no branches yet.
+func DefaultBranch(repo string) string {
+	if out, err := git(repo, "symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD"); err == nil {
+		if b, ok := strings.CutPrefix(strings.TrimSpace(out), "origin/"); ok && b != "" {
+			return b
+		}
+	}
+	for _, b := range []string{"main", "master", "trunk", "develop"} {
+		if _, err := git(repo, "rev-parse", "-q", "--verify", "refs/remotes/origin/"+b); err == nil {
+			return b
+		}
+	}
+	return ""
+}
+
+// FreshBase fetches origin and returns its default branch as a ref, like
+// origin/main, or "" when there is no origin to start from. A failed fetch
+// (offline) still returns the last copy fetched.
+func FreshBase(repo string) string {
+	if !HasOrigin(repo) {
+		return ""
+	}
+	git(repo, "fetch", "-q", "--prune", "origin")
+	if _, err := git(repo, "rev-parse", "-q", "--verify", "refs/remotes/origin/HEAD"); err != nil {
+		git(repo, "remote", "set-head", "origin", "--auto") // learn the default branch once
+	}
+	if b := DefaultBranch(repo); b != "" {
+		return "origin/" + b
+	}
+	return ""
+}
+
+// FreshBaseName is origin's default branch as a ref, like origin/main,
+// without fetching; "" when there is none.
+func FreshBaseName(repo string) string {
+	if b := DefaultBranch(repo); b != "" {
+		return "origin/" + b
+	}
+	return ""
+}
+
+// ErrConflict is an update onto origin's default branch that conflicts.
+type ErrConflict struct {
+	Onto  string
+	Files []string
+}
+
+func (e *ErrConflict) Error() string {
+	return fmt.Sprintf("the work conflicts with %s in %s", e.Onto, strings.Join(e.Files, ", "))
+}
+
+// CatchUp brings the job's work onto the latest origin default branch.
+// base is the commit the work started from; everything since (committed or
+// not) is the work. It returns the new base, or base when origin hasn't
+// moved. The work comes back uncommitted on top of the new base.
+//
+// On a conflict the rebase is left in progress with conflict markers in
+// the files, so an agent can resolve them; call Continue after, or Abort.
+func (w *Worktree) CatchUp(base string) (string, error) {
+	onto := FreshBase(w.Repo)
+	if onto == "" {
+		return base, nil
+	}
+	target, err := w.rev(onto)
+	if err != nil {
+		return base, err
+	}
+	if _, err := git(w.Path, "merge-base", "--is-ancestor", target, base); err == nil {
+		return base, nil // origin hasn't moved past where the work started
+	}
+	w.QuitInProgress()
+	// fold the work into one commit, so a rebase stops at most once
+	if _, err := git(w.Path, "reset", "--soft", "-q", base); err != nil {
+		return base, err
+	}
+	git(w.Path, "add", "-A")
+	if out, _ := git(w.Path, "status", "--porcelain"); strings.TrimSpace(out) == "" {
+		// no work yet: just move to the new base
+		if _, err := git(w.Path, "reset", "--hard", "-q", target); err != nil {
+			return base, err
+		}
+		return target, nil
+	}
+	if _, err := git(w.Path, "-c", "user.name=factory", "-c", "user.email=factory@localhost", "commit", "-q", "--no-verify", "-m", "factory: work in progress"); err != nil {
+		return base, err
+	}
+	if _, err := git(w.Path, "-c", "user.name=factory", "-c", "user.email=factory@localhost", "rebase", "-q", target); err != nil {
+		files := w.Conflicted()
+		if len(files) == 0 {
+			git(w.Path, "rebase", "--abort")
+			git(w.Path, "reset", "--soft", "-q", base)
+			return base, err
+		}
+		return target, &ErrConflict{Onto: onto, Files: files}
+	}
+	_, err = git(w.Path, "reset", "--soft", "-q", target)
+	return target, err
+}
+
+// Conflicted lists files with unresolved conflicts.
+func (w *Worktree) Conflicted() []string {
+	out, _ := git(w.Path, "diff", "--name-only", "--diff-filter=U")
+	return strings.Fields(out)
+}
+
+// Continue finishes a CatchUp that stopped on a conflict, once the
+// conflicts are resolved in the files, and leaves the work uncommitted on
+// top of target.
+func (w *Worktree) Continue(target string) error {
+	if files := w.withMarkers(); len(files) > 0 {
+		return &ErrConflict{Onto: FreshBaseName(w.Repo), Files: files}
+	}
+	git(w.Path, "add", "-A")
+	cmd := exec.Command("git", "-c", "user.name=factory", "-c", "user.email=factory@localhost", "rebase", "--continue")
+	cmd.Dir, cmd.Env = w.Path, append(os.Environ(), "GIT_EDITOR=true")
+	if out, err := cmd.CombinedOutput(); err != nil && w.inProgress("rebase-merge") {
+		return fmt.Errorf("git rebase --continue: %v: %s", err, strings.TrimSpace(string(out)))
+	}
+	_, err := git(w.Path, "reset", "--soft", "-q", target)
+	return err
+}
+
+// Abort gives up a CatchUp that stopped on a conflict: the work is back,
+// uncommitted, on the base it started from.
+func (w *Worktree) Abort(base string) {
+	git(w.Path, "rebase", "--abort")
+	git(w.Path, "reset", "--soft", "-q", base)
+}
+
+// withMarkers lists conflicted or changed files that still hold conflict
+// markers.
+func (w *Worktree) withMarkers() []string {
+	all, _ := git(w.Path, "diff", "--name-only", "HEAD")
+	var files []string
+	for _, f := range dedupe(append(w.Conflicted(), strings.Fields(all)...)) {
+		data, err := os.ReadFile(filepath.Join(w.Path, f))
+		data = append([]byte("\n"), data...)
+		if err == nil && bytes.Contains(data, []byte("\n<<<<<<< ")) && bytes.Contains(data, []byte("\n>>>>>>> ")) {
+			files = append(files, f)
+		}
+	}
+	return files
+}
+
+func dedupe(xs []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, x := range xs {
+		if !seen[x] {
+			seen[x] = true
+			out = append(out, x)
+		}
+	}
+	return out
+}
+
+func (w *Worktree) rev(ref string) (string, error) {
+	out, err := git(w.Path, "rev-parse", ref+"^{commit}")
+	return strings.TrimSpace(out), err
+}
+
+// gitDir is the worktree's own git folder (.git/worktrees/<job>).
+func (w *Worktree) gitDir() string {
+	out, err := git(w.Path, "rev-parse", "--git-dir")
+	if err != nil {
+		return ""
+	}
+	d := strings.TrimSpace(out)
+	if !filepath.IsAbs(d) {
+		d = filepath.Join(w.Path, d)
+	}
+	return d
+}
+
+func (w *Worktree) inProgress(name string) bool {
+	d := w.gitDir()
+	if d == "" {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(d, name))
+	return err == nil
+}
+
+// QuitInProgress ends a merge, cherry-pick or revert an agent left half
+// done, keeping what it changed in the files, and aborts a rebase. The
+// engine can't reset or commit in the middle of one of those. It returns
+// what it ended, "" for nothing.
+func (w *Worktree) QuitInProgress() string {
+	switch {
+	case w.inProgress("rebase-merge") || w.inProgress("rebase-apply"):
+		git(w.Path, "rebase", "--abort")
+		return "rebase"
+	case w.inProgress("MERGE_HEAD"):
+		git(w.Path, "merge", "--quit")
+		return "merge"
+	case w.inProgress("CHERRY_PICK_HEAD"):
+		git(w.Path, "cherry-pick", "--quit")
+		return "cherry-pick"
+	case w.inProgress("REVERT_HEAD"):
+		git(w.Path, "revert", "--quit")
+		return "revert"
+	}
+	return ""
+}
+
+// Ahead counts the commits HEAD has that origin's default branch lacks,
+// by content: a commit whose change is already there doesn't count. It is
+// -1 when there is no default branch to compare with.
+func (w *Worktree) Ahead() int {
+	b := DefaultBranch(w.Repo)
+	if b == "" {
+		return -1
+	}
+	out, err := git(w.Path, "rev-list", "--count", "--cherry-pick", "--right-only", "--no-merges", "origin/"+b+"...HEAD")
+	if err != nil {
+		return -1
+	}
+	n := 0
+	fmt.Sscan(strings.TrimSpace(out), &n)
+	if n > 0 {
+		// commits that are new but change nothing against the branch
+		if d, err := git(w.Path, "diff", "--quiet", "origin/"+b, "HEAD"); err == nil && d == "" {
+			return 0
+		}
+	}
+	return n
 }
 
 // Changed lists files that differ from the branch point, including new ones.
@@ -97,12 +344,50 @@ func (w *Worktree) Uncommit(base string) error {
 // commits this one lacks, it rebases onto them first (commits whose change
 // is already there drop out), so the push is a fast-forward. A rebase that
 // conflicts is aborted and leaves the branch as it was.
+//
+// Then it rebases onto origin's default branch when that moved on, so the
+// PR is built on what is merged now and not on a base that has gone. If
+// that rewrote commits origin's copy has, the push replaces origin's copy,
+// but only if it is still the copy the engine fetched and built on.
 func (w *Worktree) Push() error {
 	if err := w.Sync(); err != nil {
 		return err
 	}
-	_, err := git(w.Path, "push", "-u", "origin", w.Branch+":refs/heads/"+w.RemoteBranch())
+	if err := w.RebaseOnDefault(); err != nil {
+		return err
+	}
+	remote := w.RemoteBranch()
+	args := []string{"push", "-u", "origin", w.Branch + ":refs/heads/" + remote}
+	if sha, err := w.rev("refs/remotes/origin/" + remote); err == nil && sha != "" {
+		if _, err := git(w.Path, "merge-base", "--is-ancestor", sha, "HEAD"); err != nil {
+			args = []string{"push", "-u", "--force-with-lease=refs/heads/" + remote + ":" + sha, "origin", w.Branch + ":refs/heads/" + remote}
+		}
+	}
+	_, err := git(w.Path, args...)
 	return err
+}
+
+// RebaseOnDefault rebases the job's commits onto origin's default branch
+// when it has moved on. Commits whose change is already there drop out. A
+// conflict is aborted and leaves the branch as it was.
+func (w *Worktree) RebaseOnDefault() error {
+	onto := FreshBase(w.Repo)
+	if onto == "" {
+		return nil
+	}
+	if _, err := git(w.Path, "merge-base", "--is-ancestor", onto, "HEAD"); err == nil {
+		return nil
+	}
+	w.QuitInProgress()
+	if _, err := git(w.Path, "rebase", "-q", onto); err != nil {
+		files := w.Conflicted()
+		git(w.Path, "rebase", "--abort")
+		if len(files) > 0 {
+			return &ErrConflict{Onto: onto, Files: files}
+		}
+		return fmt.Errorf("rebase onto %s: %w", onto, err)
+	}
+	return nil
 }
 
 // ForcePush replaces origin's copy of the branch with this one. It still
@@ -197,12 +482,19 @@ func (w *Worktree) IsClean() bool {
 // OpenPR opens a pull request for the job branch with the gh CLI and
 // returns its URL.
 func (w *Worktree) OpenPR(title, body string) (string, error) {
-	cmd := exec.Command("gh", "pr", "create", "--head", w.RemoteBranch(), "--title", title, "--body", body)
+	args := []string{"pr", "create", "--head", w.RemoteBranch(), "--title", title, "--body", body}
+	if b := DefaultBranch(w.Repo); b != "" {
+		args = append(args, "--base", b) // never on top of another branch
+	}
+	cmd := exec.Command("gh", args...)
 	cmd.Dir, cmd.Env = w.Path, ghEnv(w.Path)
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	if err := cmd.Run(); err != nil {
 		msg := strings.TrimSpace(errb.String())
+		if strings.Contains(msg, "No commits between") {
+			return "", ErrNothingToShip
+		}
 		if strings.Contains(msg, "already exists") { // opened earlier, by hand or by a repair turn
 			for _, f := range strings.Fields(msg) {
 				if strings.HasPrefix(f, "https://") {
@@ -215,6 +507,10 @@ func (w *Worktree) OpenPR(title, body string) (string, error) {
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
 	return strings.TrimSpace(lines[len(lines)-1]), nil
 }
+
+// ErrNothingToShip is a branch with no change that the default branch
+// doesn't already have: there is no pull request to open.
+var ErrNothingToShip = fmt.Errorf("the branch has no changes that origin's default branch doesn't already have")
 
 // ensureIgnored makes sure .factory/ is in the repo's .gitignore.
 func ensureIgnored(repo string) error {

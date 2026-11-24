@@ -61,8 +61,15 @@ function factoryTools(req) {
     defineTool({
       name: "ask_human",
       label: "Ask you",
-      description: "Ask the person running the factory for something only they can give, the moment you need it: credentials, an API key or token, access, an account, a URL, or a decision the ticket doesn't make. Also when you're stuck on the same problem after two tries. need: one sentence that starts with what you need, e.g. \"I need the Stripe test API key\" or \"I'm stuck on the failing login check: should I mock the clock or raise the timeout?\". why: one or two sentences on what you tried and why you can't go on. options: the choices, when it's a decision. Then end your turn; the answer comes as your next message.",
-      parameters: Type.Object({ need: Type.String(), why: Type.Optional(Type.String()), options: Type.Optional(Type.Array(Type.String())) }),
+      description:
+        "Ask the person running the factory for something only they can give: a credential or token, access, a URL, or a decision the ticket doesn't make. " +
+        "Also when the same thing has failed twice and you don't know why. They haven't been watching your work, so write the way you'd message a teammate. " +
+        "need: the question itself, one plain sentence they can answer in one reply. Name the feature or file in words; no commit hashes, branch names or engine terms (handoff, worktree, oracle, phase). " +
+        "why: one or two sentences of context, what you found and why it matters. " +
+        "recommend: what you would do and why, so they can just say yes. " +
+        "options: 2 to 4 choices as full sentences, your recommendation first, when it's a decision. " +
+        "Don't ask permission to change existing tests, to update from main or about git: the engine handles those. Then end your turn; the answer comes as your next message.",
+      parameters: Type.Object({ need: Type.String(), why: Type.Optional(Type.String()), recommend: Type.Optional(Type.String()), options: Type.Optional(Type.Array(Type.String())) }),
       execute: (_id, params) => call("ask_human", params),
     }),
     defineTool({
@@ -176,7 +183,7 @@ function productTools(req) {
   const S = Type.String(), L = Type.Array(Type.String()), O = (t) => Type.Optional(t);
   return [
     tool("ask_owner", "Put one question to a ticket's owner. It goes on the ticket as a comment; the owner answers there.", Type.Object({ issue: S, question: S })),
-    tool("start_job", "Ask the engine to start a job on a ready ticket. why is one line; notes is what the job should know.", Type.Object({ issue: S, why: S, notes: O(S) })),
+    tool("start_job", "Ask the engine to start a job on a ready ticket. why is one line; notes is what the job should know. tests_allowed true lets the job change existing tests freely, when the ticket or its owner says so; otherwise the reviewer checks every change to an existing test.", Type.Object({ issue: S, why: S, notes: O(S), tests_allowed: O(Type.Boolean()) })),
     tool("finish_triage", "End the triage run with a summary, the ready tickets you didn't start, and the tickets waiting on the owner.", Type.Object({ summary: S, ready: O(L), blocked: O(L) })),
   ];
 }

@@ -188,3 +188,55 @@ func ghEnv(dir string) []string {
 	}
 	return env
 }
+
+// BoardCheckout is a read-only checkout of origin's default branch, fresh
+// from a fetch, for agents that read the code without changing it (the
+// product agent). It lives in .factory/board and is reset every time. With
+// no origin it returns the repo itself. It also returns what it checked out.
+func BoardCheckout(repo string) (path, from string) {
+	base := FreshBase(repo)
+	if base == "" {
+		return repo, ""
+	}
+	path = filepath.Join(repo, ".factory", "board")
+	if err := ensureIgnored(repo); err != nil {
+		return repo, ""
+	}
+	if _, err := os.Stat(filepath.Join(path, ".git")); err == nil {
+		if _, err := git(path, "checkout", "-q", "--detach", "--force", base); err == nil {
+			git(path, "clean", "-fdq")
+			return path, base
+		}
+	}
+	os.RemoveAll(path)
+	git(repo, "worktree", "prune")
+	if _, err := git(repo, "worktree", "add", "-q", "--detach", path, base); err != nil {
+		return repo, ""
+	}
+	return path, base
+}
+
+// PRState asks GitHub what became of a pull request: MERGED, CLOSED, or
+// OPEN with whether it can merge ("OPEN, conflicts with the base"). It is
+// "" when gh can't tell.
+func PRState(repo, url string) string {
+	cmd := exec.Command("gh", "pr", "view", url, "--json", "state,mergeable")
+	cmd.Dir, cmd.Env = repo, ghEnv(repo)
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	var st struct{ State, Mergeable string }
+	if json.Unmarshal(out, &st) != nil {
+		return ""
+	}
+	switch {
+	case st.State != "OPEN":
+		return st.State
+	case st.Mergeable == "CONFLICTING":
+		return "OPEN, conflicts with the base branch"
+	case st.Mergeable == "MERGEABLE":
+		return "OPEN, can merge"
+	}
+	return "OPEN"
+}

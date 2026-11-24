@@ -6,12 +6,15 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"factory/internal/config"
 	"factory/internal/job"
 	"factory/internal/triage"
+	"factory/internal/workspace"
 	"factory/internal/youtrack"
 )
 
@@ -77,6 +80,38 @@ func (s *Server) liveJobs(repo string) []triage.LiveJob {
 		}
 		out = append(out, triage.LiveJob{ID: j.ID, Issue: j.Issue, State: state})
 	}
+	return out
+}
+
+// pastJobs lists the jobs that ran in repo, newest first, with what
+// became of their pull requests.
+func (s *Server) pastJobs(repo string) []triage.PastJob {
+	s.mu.Lock()
+	list := make([]*job.Job, 0, len(s.jobs))
+	for _, j := range s.jobs {
+		if j.Repo == repo {
+			list = append(list, j)
+		}
+	}
+	s.mu.Unlock()
+	sort.Slice(list, func(a, b int) bool { return list[a].Started.After(list[b].Started) })
+	if len(list) > 25 {
+		list = list[:25]
+	}
+	out := make([]triage.PastJob, len(list))
+	var wg sync.WaitGroup
+	for i, j := range list {
+		state, pr, _, _ := j.Shipped()
+		out[i] = triage.PastJob{ID: j.ID, Issue: j.Issue, State: state, PR: pr}
+		if pr != "" {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				out[i].PRState = workspace.PRState(repo, out[i].PR)
+			}(i)
+		}
+	}
+	wg.Wait()
 	return out
 }
 
@@ -173,15 +208,21 @@ func (s *Server) beginTriage(b triageOpts) (*triage.Run, int, error) {
 	id := fmt.Sprintf("T%d", time.Now().UnixMilli())
 	run := &triage.Run{ID: id, Repo: repo, Project: project, Level: level, MaxJobs: maxJobs, Focus: strings.TrimSpace(b.Focus), Auto: b.auto, Why: b.why,
 		Time: time.Duration(b.Minutes * float64(time.Minute)), RT: rt, Model: role.Model, Ops: s.Ops, Bus: s.Bus,
-		Dir:  filepath.Join(config.Home(), "triage", id),
-		Live: func() []triage.LiveJob { return s.liveJobs(repo) },
-		Start: func(issue, notes string) (string, error) {
+		Dir:    filepath.Join(config.Home(), "triage", id),
+		Live:   func() []triage.LiveJob { return s.liveJobs(repo) },
+		Recent: func() []triage.PastJob { return s.pastJobs(repo) },
+		Board: func(ctx context.Context) ([]youtrack.Card, bool, error) {
+			return youtrack.Client{URL: settings.YouTrack.URL, Token: settings.YouTrack.Token}.Board(ctx, project, 100)
+		},
+		Start: func(issue, notes string, testsAllowed bool) (string, error) {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 			defer cancel()
-			jobID, _, err := s.launch(ctx, job.Spec{Issue: issue, Repo: repo,
+			jobID, _, err := s.launch(ctx, job.Spec{Issue: issue, Repo: repo, TestsAllowed: testsAllowed,
 				Notes: "Picked by the product agent (Pericles) in triage run " + id + ".\n" + notes})
 			return jobID, err
 		}}
+	// he reads the code as it is merged now, not the main checkout
+	run.Cwd, run.Base = workspace.BoardCheckout(repo)
 	s.mu.Lock()
 	if s.triage == nil {
 		s.triage = map[string]*triage.Run{}

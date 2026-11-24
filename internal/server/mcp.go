@@ -9,6 +9,15 @@ import (
 // Codex agents get the same factory tools as Pi agents. Each agent has its
 // own endpoint, /mcp/<job>/<agent>, so the engine knows who is calling.
 
+// askHumanHelp is the ask_human tool's description; pi-host has the same text.
+const askHumanHelp = "Ask the person running the factory for something only they can give: a credential or token, access, a URL, or a decision the ticket doesn't make. " +
+	"Also when the same thing has failed twice and you don't know why. They haven't been watching your work, so write the way you'd message a teammate. " +
+	"need: the question itself, one plain sentence they can answer in one reply. Name the feature or file in words; no commit hashes, branch names or engine terms (handoff, worktree, oracle, phase). " +
+	"why: one or two sentences of context, what you found and why it matters. " +
+	"recommend: what you would do and why, so they can just say yes. " +
+	"options: 2 to 4 choices as full sentences, your recommendation first, when it's a decision. " +
+	"Don't ask permission to change existing tests, to update from main or about git: the engine handles those. Then end your turn; the answer comes as your next message."
+
 var mcpTools = []map[string]any{
 	{
 		"name": "handoff",
@@ -32,8 +41,8 @@ var mcpTools = []map[string]any{
 	},
 	{
 		"name":        "ask_human",
-		"description": "Ask the person running the factory for something only they can give, the moment you need it: credentials, an API key or token, access, an account, a URL, or a decision the ticket doesn't make. Also when you're stuck on the same problem after two tries. need: one sentence that starts with what you need, e.g. \"I need the Stripe test API key\" or \"I'm stuck on the failing login check: should I mock the clock or raise the timeout?\". why: one or two sentences on what you tried and why you can't go on. options: the choices, when it's a decision. Then end your turn; the answer comes as your next message.",
-		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"need": str_(), "why": str_(), "options": list_()}, "required": []string{"need"}},
+		"description": askHumanHelp,
+		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"need": str_(), "why": str_(), "recommend": str_(), "options": list_()}, "required": []string{"need"}},
 	},
 	{
 		"name": "ask_builder",
@@ -139,8 +148,9 @@ var mcpTools = []map[string]any{
 		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"issue": str_(), "question": str_()}, "required": []string{"issue", "question"}},
 	},
 	{
-		"name": "start_job", "description": "Product agent only: ask the engine to start a job on a ready ticket. why is one line; notes is what the job should know.",
-		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"issue": str_(), "why": str_(), "notes": str_()}, "required": []string{"issue", "why"}},
+		"name": "start_job", "description": "Product agent only: ask the engine to start a job on a ready ticket. why is one line; notes is what the job should know. " +
+			"tests_allowed true lets the job change existing tests freely, when the ticket or its owner says so; otherwise the reviewer checks every change to an existing test.",
+		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"issue": str_(), "why": str_(), "notes": str_(), "tests_allowed": map[string]any{"type": "boolean"}}, "required": []string{"issue", "why"}},
 	},
 	{
 		"name": "finish_triage", "description": "Product agent only: end the triage run with a summary, the ready tickets you didn't start, and the tickets waiting on the owner.",
